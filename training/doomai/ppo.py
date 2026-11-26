@@ -348,6 +348,8 @@ def main(argv=None) -> None:
         ck = torch.load(args.resume, map_location=device, weights_only=False)
         net.load_state_dict(ck["model"])
         opt.load_state_dict(ck["optimizer"])
+        for group in opt.param_groups:
+            group["lr"] = args.lr  # a resumed run uses the --lr given now, not the one saved
         update, total_steps = ck["update"], ck["steps"]
         for i, d in enumerate(ck["difficulty"]):
             difficulty[i] = d
