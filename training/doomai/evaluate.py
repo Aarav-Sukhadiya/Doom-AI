@@ -31,10 +31,18 @@ def _load_agent(weights: str, greedy: bool):
     spec = importlib.util.spec_from_file_location("submission_agent_eval", REPO / "submission" / "agent.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    import torch
+
     tmp = Path(tempfile.mkdtemp(prefix="doomai_eval_w_"))
+    config = {"greedy": greedy}
     if weights:
-        os.symlink(Path(weights).resolve(), tmp / "model.pt")
-    (tmp / "config.json").write_text(json.dumps({"greedy": greedy}))
+        state = torch.load(weights, map_location="cpu", weights_only=False)
+        state = state["model"] if isinstance(state, dict) and "model" in state else state
+        torch.save(state, tmp / "model.pt")
+        run_config = Path(weights).resolve().parent / "config.json"
+        if run_config.exists():
+            config = dict(json.loads(run_config.read_text()), greedy=greedy)
+    (tmp / "config.json").write_text(json.dumps(config))
     module.WEIGHTS_DIR = tmp
     from doom_env import spaces as S
 

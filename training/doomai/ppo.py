@@ -60,7 +60,7 @@ def worker_main(remote, worker_id: int, envs_per_worker: int, difficulty, weight
         d = float(np.clip(difficulty[tier - 1] + build_rng.normal(0, 0.1), 0.0, 1.0))
         level = generate(tier, int(build_rng.choice(train_seeds)), difficulty=round(d, 2))
         counter[0] += 1
-        path = Path(map_dir) / f"w{worker_id}_e{i}_{counter[0] % 8}.wad"
+        path = Path(map_dir) / f"w{worker_id}_e{i}_{counter[0]}.wad"
         write_grid_wad(level.grid, path, player_angle=level.player_angle)
         return ShapedDoomEnv(str(path), "MAP01", episode_ticks=level.episode_ticks), tier
 
@@ -70,7 +70,9 @@ def worker_main(remote, worker_id: int, envs_per_worker: int, difficulty, weight
         env, tier = pending[i].result()
         pending[i] = builder.submit(build, i)
         if envs[i] is not None:
+            old = Path(envs[i].wad)
             envs[i].close()
+            old.unlink(missing_ok=True)
         envs[i] = env
         tiers[i] = tier
         plays[i] = 0
