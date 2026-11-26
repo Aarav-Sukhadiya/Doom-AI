@@ -93,10 +93,15 @@ class LandmarkTracker:
         self.seen_now = np.zeros(NUM_SLOTS, bool)
         self.valid[0] = True
 
-    def _write(self, slot: int, dist_norm: float, rel_angle: float) -> None:
+    def _write(self, slot: int, dist_norm: float, rel_sin: float, rel_cos: float) -> None:
+        """Store a sighting at distance dist_norm and relative direction (sin, cos) in the start frame."""
         d = float(np.clip(dist_norm, 0.0, 1.0)) * RAY_RANGE
-        h = math.radians(self.odo.heading) + rel_angle
-        self.pos[slot] = (self.odo.x + d * math.cos(h), self.odo.y + d * math.sin(h))
+        norm = math.hypot(rel_sin, rel_cos) or 1.0
+        rs, rc = rel_sin / norm, rel_cos / norm
+        h = math.radians(self.odo.heading)
+        hs, hc = math.sin(h), math.cos(h)
+        dir_cos, dir_sin = hc * rc - hs * rs, hs * rc + hc * rs
+        self.pos[slot] = (self.odo.x + d * dir_cos, self.odo.y + d * dir_sin)
         self.valid[slot] = True
         self.age[slot] = 0.0
         self.seen_now[slot] = True
@@ -117,7 +122,8 @@ class LandmarkTracker:
             idx = np.flatnonzero(hit == kind)
             if len(idx):
                 k = int(idx[np.argmin(dist[idx])])
-                self._write(slot, dist[k], k * 2.0 * math.pi / NUM_RAYS)
+                ray = k * 2.0 * math.pi / NUM_RAYS
+                self._write(slot, dist[k], math.sin(ray), math.cos(ray))
 
         ents = obs["visible_entities"]
         mask = np.asarray(ents["mask"]) > 0
@@ -130,9 +136,9 @@ class LandmarkTracker:
                 continue
             d = feats[i, 0]
             if slot not in best or d < best[slot][0]:
-                best[slot] = (d, math.atan2(feats[i, 1], feats[i, 2]))
-        for slot, (d, ang) in best.items():
-            self._write(slot, d, ang)
+                best[slot] = (d, feats[i, 1], feats[i, 2])
+        for slot, (d, rel_sin, rel_cos) in best.items():
+            self._write(slot, d, rel_sin, rel_cos)
         return self.features()
 
     def features(self) -> np.ndarray:
@@ -145,13 +151,13 @@ class LandmarkTracker:
         fwd = dx * c + dy * s
         left = -dx * s + dy * c
         dist = np.hypot(fwd, left)
-        bearing = np.arctan2(left, fwd)
+        safe = np.where(dist > 1e-6, dist, 1.0)
         out[:, 0] = self.valid
         out[:, 1] = np.clip(fwd / RAY_RANGE, -4, 4)
         out[:, 2] = np.clip(left / RAY_RANGE, -4, 4)
         out[:, 3] = np.clip(dist / RAY_RANGE, 0, 4)
-        out[:, 4] = np.sin(bearing)
-        out[:, 5] = np.cos(bearing)
+        out[:, 4] = np.where(dist > 1e-6, left / safe, 0.0)
+        out[:, 5] = np.where(dist > 1e-6, fwd / safe, 1.0)
         out[:, 6] = np.clip(self.age / 256.0, 0, 4)
         out[~self.valid] = 0.0
         return out
