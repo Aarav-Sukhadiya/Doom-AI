@@ -13,6 +13,18 @@ dependencies = [
 
 [dependency-groups]
 dev = ["pytest>=8"]
+train = [
+    "tensorboard>=2.21.0",
+    "torch==2.15.0",
+]
 
 [tool.uv.sources]
 doom-env = { path = "env", editable = true }
+
+[[tool.uv.index]]
+name = "pytorch-cu132"
+url = "https://download.pytorch.org/whl/cu132"
+
+[tool.pytest.ini_options]
+pythonpath = ["training", "tests"]
+testpaths = ["tests", "training/tests"]
