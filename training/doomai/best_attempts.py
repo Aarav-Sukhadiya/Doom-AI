@@ -42,7 +42,7 @@ HARD_MAPS = (
     ("tier4_40223", 4, 40223, None),
     ("tier4_40051", 4, 40051, None),
     ("tier4_40204", 4, 40204, None),
-    ("freedoom_MAP31", 9, 0, "MAP31"),
+    ("freedoom_MAP29", 9, 0, "MAP29"),  # MAP31 starts the player in a cage it cannot leave
 )
 
 
