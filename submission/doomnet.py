@@ -44,17 +44,18 @@ from doomobs import (  # noqa: F401
     preprocess,
     stack,
 )
-from landmarks import NUM_SLOTS, SLOT_FEATURES, LandmarkTracker  # noqa: F401
+from landmarks import CRUMB_FEATURES, NUM_SLOTS, SLOT_FEATURES, LandmarkTracker  # noqa: F401
 
 def to_tensors(arrays: dict[str, np.ndarray], device) -> dict[str, torch.Tensor]:
     return {k: torch.from_numpy(np.ascontiguousarray(v)).to(device, non_blocking=True) for k, v in arrays.items()}
 
 
 class DoomNet(nn.Module):
-    def __init__(self, hidden: int = 256, slots: bool = False):
+    def __init__(self, hidden: int = 256, slots: bool = False, crumbs: bool = False):
         super().__init__()
         self.hidden = hidden
         self.use_slots = slots
+        self.use_crumbs = crumbs
         self.cnn = nn.Sequential(
             nn.Conv2d(4, 32, 5, stride=2), nn.ReLU(),
             nn.Conv2d(32, 64, 3, stride=2), nn.ReLU(),
@@ -80,6 +81,11 @@ class DoomNet(nn.Module):
             self.slot_out = nn.Linear(64, hidden)
             nn.init.zeros_(self.slot_out.weight)
             nn.init.zeros_(self.slot_out.bias)
+        if crumbs:
+            self.crumb_mlp = nn.Sequential(nn.Linear(CRUMB_FEATURES, 64), nn.ReLU())
+            self.crumb_out = nn.Linear(64, hidden)
+            nn.init.zeros_(self.crumb_out.weight)
+            nn.init.zeros_(self.crumb_out.bias)
         self.gru = nn.GRUCell(hidden, hidden)
         self.policy = nn.Linear(hidden, sum(HEAD_SIZES))
         self.value = nn.Linear(hidden, 1)
@@ -104,6 +110,8 @@ class DoomNet(nn.Module):
         e_max = torch.where(any_entity, e_max, torch.zeros_like(e_max))
         v = self.vit_fc(torch.cat([x["vitals"], prev_action], dim=-1))
         z = self.trunk(torch.cat([img, r, torch.cat([e_mean, e_max], -1), v], dim=-1))
+        if self.use_crumbs:
+            z = z + self.crumb_out(self.crumb_mlp(x["crumbs"]))
         if self.use_slots:
             z = z + self.read_slots(x["slots"], z)
         return z

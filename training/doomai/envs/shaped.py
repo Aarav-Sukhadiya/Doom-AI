@@ -22,7 +22,7 @@ REWARD = {
     "locked_door": 3.0,
     "new_sector": 0.2,
     "new_cell": 0.02,
-    "new_cell_decay": 0.995,
+    "new_cell_decay": 0.998,
     "kill": 1.0,
     "damage_dealt": 0.01,
     "damage_taken": -0.01,

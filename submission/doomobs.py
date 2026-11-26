@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from landmarks import NUM_SLOTS, SLOT_FEATURES, LandmarkTracker
+from landmarks import CRUMB_FEATURES, NUM_SLOTS, SLOT_FEATURES, LandmarkTracker
 
 NUM_RAYS = 64
 NUM_HIT_TYPES = 6
@@ -64,6 +64,10 @@ def observe(obs: dict, tracker: LandmarkTracker, action) -> dict[str, np.ndarray
         out["slots"] = tracker.observe(obs, action)
     except Exception:
         out["slots"] = np.zeros((NUM_SLOTS, SLOT_FEATURES), np.float32)
+    try:
+        out["crumbs"] = tracker.crumbs()
+    except Exception:
+        out["crumbs"] = np.zeros(CRUMB_FEATURES, np.float32)
     return out
 
 

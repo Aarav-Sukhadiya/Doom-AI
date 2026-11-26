@@ -32,6 +32,11 @@ NUM_SLOTS = len(SLOT_TYPES)
 SLOT_FEATURES = 7
 _ENTITY_SLOT = {ENT_KEY: 1, ENT_HEALTH: 4, ENT_AMMO: 5, ENT_WEAPON: 6, ENT_ARMOR: 7}
 
+CRUMB_CELL = 128.0
+CRUMB_DIRECTIONS = 8
+CRUMB_RADII = (1, 2, 4)
+CRUMB_FEATURES = 2 + CRUMB_DIRECTIONS * len(CRUMB_RADII)
+
 
 def ego_to_world(fwd: float, right: float, heading_deg: float) -> tuple[float, float]:
     h = math.radians(heading_deg)
@@ -94,6 +99,7 @@ class LandmarkTracker:
         self.age = np.zeros(NUM_SLOTS, np.float64)
         self.seen_now = np.zeros(NUM_SLOTS, bool)
         self.valid[0] = True
+        self.visits: dict[tuple[int, int], int] = {}
 
     def _write(self, slot: int, dist_norm: float, rel_sin: float, rel_cos: float, cap: float = 1.0) -> None:
         """Store a sighting at distance dist_norm and relative direction (sin, cos) in the start frame."""
@@ -116,6 +122,8 @@ class LandmarkTracker:
             self.odo.update(np.asarray(action), vitals)
         self.age += 1.0
         self.seen_now[:] = False
+        here = self._cell(self.odo.x, self.odo.y)
+        self.visits[here] = self.visits.get(here, 0) + 1
 
         rays = obs["rays"]
         dist = np.nan_to_num(np.asarray(rays["distance"], np.float64), nan=1.0, posinf=1.0, neginf=1.0)
@@ -142,6 +150,29 @@ class LandmarkTracker:
         for slot, (d, rel_sin, rel_cos) in best.items():
             self._write(slot, d, rel_sin, rel_cos, self.entity_range)
         return self.features()
+
+    @staticmethod
+    def _cell(x: float, y: float) -> tuple[int, int]:
+        return int(math.floor(x / CRUMB_CELL)), int(math.floor(y / CRUMB_CELL))
+
+    def crumbs(self) -> np.ndarray:
+        """Breadcrumbs: how often the agent has already been here and at 1, 2 and 4 cells (128 units each)
+        in 8 directions around its current heading, from its own dead-reckoned path. Lets the network
+        tell ground it has covered from new ground on large maps."""
+        out = np.zeros(CRUMB_FEATURES, np.float32)
+        x, y = self.odo.x, self.odo.y
+        out[0] = min(1.0, math.log1p(self.visits.get(self._cell(x, y), 0)) / 4.0)
+        out[1] = min(4.0, len(self.visits) / 100.0)
+        h = math.radians(self.odo.heading)
+        k = 2
+        for d in range(CRUMB_DIRECTIONS):
+            a = h + d * 2.0 * math.pi / CRUMB_DIRECTIONS
+            ca, sa = math.cos(a), math.sin(a)
+            for r in CRUMB_RADII:
+                n = self.visits.get(self._cell(x + r * CRUMB_CELL * ca, y + r * CRUMB_CELL * sa), 0)
+                out[k] = min(1.0, math.log1p(n) / 4.0)
+                k += 1
+        return out
 
     def features(self) -> np.ndarray:
         """(NUM_SLOTS, 7): valid, forward and left offset, distance, sin and cos of bearing (ego), age."""
