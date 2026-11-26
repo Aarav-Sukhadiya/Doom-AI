@@ -40,7 +40,6 @@ from doomobs import (  # noqa: F401
     USE_HEAD,
     VITAL_SCALE,
     decode_action,
-    encode_prev_action,
     observe,
     preprocess,
     stack,

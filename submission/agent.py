@@ -25,13 +25,12 @@ class DoomAgent:
         self.greedy = bool(config.get("greedy", False))
         self.fire_mask = bool(config.get("fire_mask", False))
         self.net = DoomNet(hidden=int(config.get("hidden", 256)), slots=bool(config.get("slots", False)))
-        self.tracker = LandmarkTracker()
+        self.tracker = LandmarkTracker(float(config.get("entity_range", 1.0)))
         weights = WEIGHTS_DIR / "model.pt"
         if weights.exists():
             state = torch.load(weights, map_location="cpu", weights_only=True)
             self.net.load_state_dict(state, strict=True)
         self.net.to(self.device).eval()
-        self.generator = torch.Generator(device="cpu").manual_seed(0)
         torch.manual_seed(0)
         self.reset()
 

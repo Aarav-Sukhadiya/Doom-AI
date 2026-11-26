@@ -35,6 +35,7 @@ def main() -> None:
     p.add_argument("--shipped-score", type=float, required=True)
     p.add_argument("--margin", type=float, default=0.3)
     p.add_argument("--interval", type=int, default=300)
+    p.add_argument("--per-tier", type=int, default=20, help="levels per tier in the trainer's validation (for the commit message)")
     args = p.parse_args()
     run_dir = REPO / "runs" / args.run
     best = args.shipped_score
@@ -72,11 +73,14 @@ def main() -> None:
             run(["git", "add", "submission/weights"])
             msg = (f"Auto-ship {args.run} update {update}: validation score {score:.3f}\n\n"
                    f"Beat the previously shipped score {best:.3f} by at least {args.margin} on the same\n"
-                   f"validation levels (20 per tier) and passed validate.py.\n\n"
+                   f"validation levels ({args.per_tier} per tier) and passed validate.py.\n\n"
                    "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>")
-            commit = run(["git", "commit", "-m", msg])
+            commit = run(["git", "commit", "-m", msg, "--", "submission/weights"])
+            if commit.returncode != 0:
+                log(f"commit failed, not pushing: {(commit.stdout + commit.stderr)[-500:]}")
+                continue
             push = run(["git", "push", "origin", "main"], timeout=600)
-            log(f"shipped update {update} (commit rc {commit.returncode}, push rc {push.returncode})")
+            log(f"shipped update {update} (push rc {push.returncode})")
             if push.returncode == 0:
                 best = score
         time.sleep(args.interval)

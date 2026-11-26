@@ -160,3 +160,15 @@ def test_fire_mask_blocks_attack_only_when_enabled_and_no_enemy():
         free, _, _ = net(x, torch.zeros(8, 9), net.initial_state(8), torch.ones(8))
     assert (sample(masked)[:, 3] == 0).all()
     assert (sample(free, greedy=True)[:, 3] == 1).all()
+
+
+def test_far_entity_kept_at_its_distance_with_entity_range():
+    import numpy as np
+
+    from landmarks import RAY_RANGE
+
+    for cap, expected in ((1.0, 1.0), (4.0, 3.0)):
+        tracker = LandmarkTracker(cap)
+        tracker.reset()
+        tracker._write(1, 3.0, 0.0, 1.0, tracker.entity_range)
+        assert abs(np.hypot(*tracker.pos[1]) - expected * RAY_RANGE) < 1e-6

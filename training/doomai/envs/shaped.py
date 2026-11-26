@@ -100,7 +100,7 @@ class ShapedDoomEnv(DoomEnv):
             self._locator = SectorLocator(self.sector_polygons())
         st = self.privileged_state()
         self._door = st["door_lock"].copy()
-        self._opened = np.zeros(len(self._door), bool)
+        self._opened = (self._door >= 0) & (st["sector_ceiling"] - st["sector_floor"] >= DOOR_OPEN_GAP)
         self._sectors_seen: set[int] = set()
         self._cells_seen: set[tuple[int, int]] = set()
         self._prev = {

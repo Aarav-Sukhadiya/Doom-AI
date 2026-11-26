@@ -81,7 +81,9 @@ class Odometry:
 class LandmarkTracker:
     """Call observe(obs, None) after reset and observe(obs, action) after every step."""
 
-    def __init__(self):
+    def __init__(self, entity_range: float = 1.0):
+        """entity_range caps entity distances (in RAY_RANGE units); the entity list reaches 4 (4096 units)."""
+        self.entity_range = float(entity_range)
         self.odo = Odometry()
         self.reset()
 
@@ -93,9 +95,9 @@ class LandmarkTracker:
         self.seen_now = np.zeros(NUM_SLOTS, bool)
         self.valid[0] = True
 
-    def _write(self, slot: int, dist_norm: float, rel_sin: float, rel_cos: float) -> None:
+    def _write(self, slot: int, dist_norm: float, rel_sin: float, rel_cos: float, cap: float = 1.0) -> None:
         """Store a sighting at distance dist_norm and relative direction (sin, cos) in the start frame."""
-        d = float(np.clip(dist_norm, 0.0, 1.0)) * RAY_RANGE
+        d = float(np.clip(dist_norm, 0.0, cap)) * RAY_RANGE
         norm = math.hypot(rel_sin, rel_cos) or 1.0
         rs, rc = rel_sin / norm, rel_cos / norm
         h = math.radians(self.odo.heading)
@@ -138,7 +140,7 @@ class LandmarkTracker:
             if slot not in best or d < best[slot][0]:
                 best[slot] = (d, feats[i, 1], feats[i, 2])
         for slot, (d, rel_sin, rel_cos) in best.items():
-            self._write(slot, d, rel_sin, rel_cos)
+            self._write(slot, d, rel_sin, rel_cos, self.entity_range)
         return self.features()
 
     def features(self) -> np.ndarray:

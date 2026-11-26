@@ -42,13 +42,11 @@ class Subgoals:
         if path:
             seq.append(("exit", path[-1]))
         self.stages = seq
-        locks = [cell for ch, cell in seq if ch in LOCK_NUMBER]
         self.dist = []
         for k, (ch, target) in enumerate(seq):
             closed = {cell for (c2, cell) in seq[k:] if c2 in LOCK_NUMBER} - {target}
             self.dist.append(self._bfs(target, closed))
         self.d_max = 1 + max((max(d.values()) for d in self.dist if d), default=0)
-        self.locks = locks
 
     def _bfs(self, target, closed) -> dict:
         dist = {target: 0}

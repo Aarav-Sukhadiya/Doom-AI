@@ -296,19 +296,20 @@ def _build(tier: int, rng: random.Random, difficulty: float):
         lock_rooms = sorted(rng.sample(lockable, min(len(colours), len(lockable))), key=lambda i: rooms[i].depth)
         blocked: set[int] = set()
         for colour, lock_room in zip(colours, lock_rooms):
-            open_rooms = [i for i in range(len(rooms)) if i not in _subtree(rooms, lock_room) and i not in blocked - set()]
+            behind = _subtree(rooms, lock_room)
+            open_rooms = [i for i in range(len(rooms)) if i not in behind and i not in blocked]
             if tier == 4 and locks:
-                open_rooms = [i for i in _subtree(rooms, lock_rooms[0]) if i not in _subtree(rooms, lock_room)] or open_rooms
+                open_rooms = [i for i in _subtree(rooms, lock_rooms[0]) if i not in behind] or open_rooms
             if len(open_rooms) > 1:
                 open_rooms = [i for i in open_rooms if i != 0]
-            elif tier in (3, 4):
+            elif not open_rooms or open_rooms == [0]:
                 return None
             key_room = max(open_rooms, key=lambda i: (rooms[i].depth, rng.random()))
             dy, dx = rooms[lock_room].door
             canvas.g[dy][dx] = colour
             _place(canvas, rooms[key_room], KEYS[colour], rng)
             locks.append(colour)
-            blocked |= _subtree(rooms, lock_room)
+            blocked |= behind
         for i, r in enumerate(rooms[1:], 1):
             if canvas.g[r.door[0]][r.door[1]] == "." and rng.random() < 0.4:
                 canvas.g[r.door[0]][r.door[1]] = "D"

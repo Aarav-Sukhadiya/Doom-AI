@@ -83,7 +83,3 @@ def decode_action(choice: np.ndarray) -> np.ndarray:
     out[:, 6] = choice[:, 3] == 1
     out[:, 7] = choice[:, 4] == 1
     return out
-
-
-def encode_prev_action(buttons: np.ndarray) -> np.ndarray:
-    return np.asarray(buttons, np.float32).reshape(-1, NUM_BUTTONS)

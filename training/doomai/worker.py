@@ -27,7 +27,7 @@ FREEDOOM_TRAIN_MAPS = 20
 FREEDOOM_TICKS = 4200
 
 
-def worker_main(remote, worker_id: int, envs_per_worker: int, difficulty, weights, seed: int, map_dir: str, reward_cfg: dict | None = None, hard_share: float = 0.0, freedoom_share: float = 0.0):
+def worker_main(remote, worker_id: int, envs_per_worker: int, difficulty, weights, seed: int, map_dir: str, reward_cfg: dict | None = None, hard_share: float = 0.0, freedoom_share: float = 0.0, entity_range: float = 1.0):
     from doomai.envs.shaped import ShapedDoomEnv
     from doomai.maps.generate import generate, seeds_for
     from doomai.maps.grid import write_grid_wad
@@ -38,7 +38,7 @@ def worker_main(remote, worker_id: int, envs_per_worker: int, difficulty, weight
     build_rng = np.random.default_rng(seed + 7919)
     train_seeds = seeds_for("train", 200000)
     envs = [None] * envs_per_worker
-    trackers = [LandmarkTracker() for _ in range(envs_per_worker)]
+    trackers = [LandmarkTracker(entity_range) for _ in range(envs_per_worker)]
     tiers = [0] * envs_per_worker
     plays = [0] * envs_per_worker
     counter = [0]
