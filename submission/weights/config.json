@@ -5,5 +5,5 @@
   "entity_range": 4.0,
   "crumbs": true,
   "greedy": false,
-  "source": "runs/main12/model_u400.pt"
+  "source": "runs/main14/model_u200.pt"
 }
