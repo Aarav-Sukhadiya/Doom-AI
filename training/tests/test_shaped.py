@@ -37,6 +37,7 @@ def test_key_locked_door_exit_fire_once(tmp_path):
     assert fired(events, "key") == [3.0]
     assert fired(events, "locked_door") == [3.0]
     assert fired(events, "door") == []
+    assert fired(events, "futile_use") == []
     assert len(fired(events, "exit")) == 1 and fired(events, "exit")[0] > 10.0
     assert events[-1]["episode_stats"]["steps"] == len(events)
 
@@ -186,3 +187,18 @@ def test_weapons_added_without_changing_layout():
         assert "g" not in stripped and "n" not in stripped
         with_weapon += level.grid != stripped
     assert 10 <= with_weapon <= 35
+
+
+def test_use_on_locked_door_without_key_is_penalised(tmp_path):
+    use = np.array([0, 0, 0, 0, 0, 0, 0, 1, 0], np.int8)
+    for grid, expect in (("#######\n#PY..E#\n#######", True), ("#######\n#PD..E#\n#######", False)):
+        env = ShapedDoomEnv(str(write_grid_wad(grid, tmp_path / "m.wad")), "MAP01", episode_ticks=400)
+        env.reset(seed=0)
+        hits = 0
+        for i in range(10):
+            _, _, term, trunc, info = env.step(use if i % 2 == 0 else NOOP)
+            hits += info["reward_terms"]["futile_use"] < 0
+            if term or trunc:
+                break
+        env.close()
+        assert (hits > 0) == expect

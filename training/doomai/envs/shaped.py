@@ -33,6 +33,7 @@ REWARD = {
     "pickup_armor": 0.005,
     "pickup_ammo": 0.01,
     "pickup_weapon": 1.5,
+    "futile_use": -0.1,
     "idle_fire": -0.02,
     "living": -0.001,
     "subgoal": 0.0,
@@ -45,6 +46,8 @@ AMMO_SLICE = slice(S.VITALS_INDEX["ammo_bullets"], S.VITALS_INDEX["ammo_cells"] 
 ENEMY_TYPES = np.array([i for i, t in enumerate(S.ENTITY_TYPES) if t.startswith("enemy")])
 SELECTED_AMMO = S.VITALS_INDEX["selected_weapon_ammo"]
 HEALTH = S.VITALS_INDEX["health"]
+KEY_COLOUR = ("blue", "yellow", "red", "blue", "yellow", "red")  # vitals key_* order: cards then skulls
+LOCK_COLOUR = {1: "red", 2: "blue", 3: "yellow", 4: "red", 5: "blue", 6: "yellow", 129: "red", 130: "blue", 131: "yellow"}
 ARMOR = S.VITALS_INDEX["armor"]
 KEY_SLICE = slice(S.VITALS_INDEX["key_blue_card"], S.VITALS_INDEX["key_red_skull"] + 1)
 
@@ -120,6 +123,7 @@ class ShapedDoomEnv(DoomEnv):
             "weapons": self._weapons_owned(),
         }
         self.pickups = 0
+        self.futile_uses = 0
         self._visit(st)
         self._enemy_in_view = self._sees_enemy(obs)
         self._has_ammo = obs["vitals"][SELECTED_AMMO] > 0
@@ -127,6 +131,21 @@ class ShapedDoomEnv(DoomEnv):
         self.episode_steps = 0
         self._phi = self._potential(st, obs["vitals"])
         return obs, info
+
+    def _locked_ahead_without_key(self, st, keys) -> bool:
+        """Training-only check: is the closed door right in front of the player locked to a key colour
+        it does not hold? Used to discourage pressing USE on it over and over."""
+        a = np.radians(st["angle"])
+        held = {KEY_COLOUR[i] for i in range(len(KEY_COLOUR)) if keys[i] > 0.5}
+        for d in (24.0, 48.0, 72.0, 96.0):
+            sec = self._locator.locate(st["x"] + d * np.cos(a), st["y"] + d * np.sin(a))
+            if sec < 0 or sec >= len(self._door):
+                continue
+            lock = int(self._door[sec])
+            if lock > 0:
+                closed = st["sector_ceiling"][sec] - st["sector_floor"][sec] < DOOR_OPEN_GAP
+                return closed and LOCK_COLOUR.get(lock) is not None and LOCK_COLOUR[lock] not in held
+        return False
 
     def _weapons_owned(self) -> int:
         return sum(self._game.get_game_variable(getattr(vd.GameVariable, f"WEAPON{i}")) > 0 for i in range(2, 8))
@@ -178,6 +197,9 @@ class ShapedDoomEnv(DoomEnv):
         for k, g in gains.items():
             terms[k] = cfg[k] * g
         self.pickups += sum(g > 0 for g in gains.values())
+        futile = bool(np.asarray(action)[7]) and not st["finished"] and self._locked_ahead_without_key(st, self._prev["keys"])
+        terms["futile_use"] = cfg["futile_use"] * float(futile)
+        self.futile_uses += int(futile)
         fired_blind = bool(np.asarray(action)[6]) and not self._enemy_in_view and self._has_ammo
         terms["idle_fire"] = cfg["idle_fire"] * float(fired_blind)
         self._enemy_in_view = self._sees_enemy(obs)
@@ -221,5 +243,6 @@ class ShapedDoomEnv(DoomEnv):
                 "doors_opened": float(np.sum(self._opened)),
                 "steps": float(self.episode_steps),
                 "pickups": float(self.pickups),
+                "futile_uses": float(self.futile_uses),
             }
         return obs, float(sum(terms.values())), terminated, truncated, info

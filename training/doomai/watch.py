@@ -71,7 +71,7 @@ def play(agent, wad: str, map_name: str, ticks: int, lmp: Path, seed: int) -> tu
             "cells": len(env._cells_seen),
             "kill": terms["kill"] > 0,
             "hurt": -terms["damage_taken"] / 0.01 if terms["damage_taken"] else 0.0,
-            "event": ",".join(k for k in ("key", "door", "locked_door", "new_sector", "exit", "death") if terms.get(k, 0) > 0 or (k == "death" and terms.get(k, 0) < 0)),
+            "event": ",".join(k for k in ("key", "door", "locked_door", "new_sector", "exit", "death", "futile_use") if terms.get(k, 0) > 0 or (k in ("death", "futile_use") and terms.get(k, 0) < 0)),
         })
         if term or trunc:
             break
