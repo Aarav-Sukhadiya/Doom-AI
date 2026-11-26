@@ -98,9 +98,9 @@ LAYOUT = {
 
 
 class Workers:
-    def __init__(self, n: int, per: int, difficulty, weights, seed: int, map_dir: str, reward: dict | None = None, hard_share: float = 0.0, freedoom_share: float = 0.0, entity_range: float = 1.0):
+    def __init__(self, n: int, per: int, difficulty, weights, seed: int, map_dir: str, reward: dict | None = None, hard_share: float = 0.0, freedoom_share: float = 0.0, entity_range: float = 1.0, mapping: bool = False):
         self.n, self.per = n, per
-        self.entity_range = entity_range
+        self.entity_range, self.mapping = entity_range, mapping
         self.reward, self.hard_share, self.freedoom_share = reward, hard_share, freedoom_share
         self.difficulty, self.weights, self.seed, self.map_dir = difficulty, weights, seed, map_dir
         self.ctx = mp.get_context("forkserver")
@@ -111,7 +111,7 @@ class Workers:
 
     def _start(self, i: int, seed: int) -> None:
         parent, child = self.ctx.Pipe()
-        p = self.ctx.Process(target=worker_main, args=(child, i, self.per, self.difficulty, self.weights, seed, self.map_dir, self.reward, self.hard_share, self.freedoom_share, self.entity_range), daemon=True)
+        p = self.ctx.Process(target=worker_main, args=(child, i, self.per, self.difficulty, self.weights, seed, self.map_dir, self.reward, self.hard_share, self.freedoom_share, self.entity_range, self.mapping), daemon=True)
         p.start()
         child.close()
         self.remotes[i], self.procs[i] = parent, p
@@ -237,6 +237,7 @@ def main(argv=None) -> None:
     p.add_argument("--save-every", type=int, default=10)
     p.add_argument("--slots", action="store_true", help="enable the landmark slot memory read path")
     p.add_argument("--crumbs", action="store_true", help="breadcrumb memory input: how often the agent has been around here")
+    p.add_argument("--map", action="store_true", help="level map memory input: 32x32 map built from rays and odometry")
     p.add_argument("--entity-range", type=float, default=4.0, help="landmark distance cap for entities, in 1024-unit steps (1.0 before main10)")
     p.add_argument("--target-entropy", type=float, default=0.0, help="adapt the entropy coefficient to hold this policy entropy (0 = fixed --ent)")
     p.add_argument("--eval-every", type=int, default=200, help="score a snapshot on validation levels every N updates in the background (0 = off)")
@@ -265,8 +266,8 @@ def main(argv=None) -> None:
     writer.add_custom_scalars(LAYOUT)
     writer.add_text("guide", GUIDE, 0)
 
-    net = DoomNet(slots=args.slots, crumbs=args.crumbs).to(device)
-    (run_dir / "config.json").write_text(json.dumps({"slots": args.slots, "hidden": net.hidden, "fire_mask": args.fire_mask, "entity_range": args.entity_range, "crumbs": args.crumbs}))
+    net = DoomNet(slots=args.slots, crumbs=args.crumbs, mapping=args.map).to(device)
+    (run_dir / "config.json").write_text(json.dumps({"slots": args.slots, "hidden": net.hidden, "fire_mask": args.fire_mask, "entity_range": args.entity_range, "crumbs": args.crumbs, "map": args.map}))
 
     def batch(observations: list) -> dict:
         arrays = stack(observations)
@@ -293,7 +294,7 @@ def main(argv=None) -> None:
     elif args.init:
         state = torch.load(args.init, map_location=device, weights_only=False)
         missing, unexpected = net.load_state_dict(state["model"] if "model" in state else state, strict=False)
-        if unexpected or any(not k.startswith(("slot_", "crumb_")) for k in missing):
+        if unexpected or any(not k.startswith(("slot_", "crumb_", "map_")) for k in missing):
             raise RuntimeError(f"--init mismatch: missing {missing}, unexpected {unexpected}")
         print(f"initialised from {args.init}; new parameters: {missing}", flush=True)
 
@@ -303,7 +304,7 @@ def main(argv=None) -> None:
         stale.unlink(missing_ok=True)
     workers = Workers(args.workers, args.envs_per_worker, difficulty, weights, args.seed * 1000, map_dir,
                       reward={"subgoal": args.subgoal}, hard_share=args.hard_share, freedoom_share=args.freedoom_share,
-                      entity_range=args.entity_range)
+                      entity_range=args.entity_range, mapping=args.map)
     B, T = args.workers * args.envs_per_worker, args.rollout
     obs_all = workers.reset()
     half = args.workers // 2 if args.workers > 1 else args.workers

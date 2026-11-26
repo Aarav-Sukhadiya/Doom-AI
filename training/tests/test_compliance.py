@@ -141,5 +141,5 @@ def test_k11_shipped_weights_load_strictly():
     sys.path.insert(0, str(SUBMISSION))
     from doomnet import DoomNet
 
-    net = DoomNet(hidden=config.get("hidden", 256), slots=config.get("slots", False), crumbs=config.get("crumbs", False))
+    net = DoomNet(hidden=config.get("hidden", 256), slots=config.get("slots", False), crumbs=config.get("crumbs", False), mapping=config.get("map", False))
     net.load_state_dict(state, strict=True)

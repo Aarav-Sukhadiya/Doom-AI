@@ -44,18 +44,19 @@ from doomobs import (  # noqa: F401
     preprocess,
     stack,
 )
-from landmarks import CRUMB_FEATURES, NUM_SLOTS, SLOT_FEATURES, LandmarkTracker  # noqa: F401
+from landmarks import CRUMB_FEATURES, MAP_CHANNELS, MAP_VIEW, NUM_SLOTS, SLOT_FEATURES, LandmarkTracker  # noqa: F401
 
 def to_tensors(arrays: dict[str, np.ndarray], device) -> dict[str, torch.Tensor]:
     return {k: torch.from_numpy(np.ascontiguousarray(v)).to(device, non_blocking=True) for k, v in arrays.items()}
 
 
 class DoomNet(nn.Module):
-    def __init__(self, hidden: int = 256, slots: bool = False, crumbs: bool = False):
+    def __init__(self, hidden: int = 256, slots: bool = False, crumbs: bool = False, mapping: bool = False):
         super().__init__()
         self.hidden = hidden
         self.use_slots = slots
         self.use_crumbs = crumbs
+        self.use_map = mapping
         self.cnn = nn.Sequential(
             nn.Conv2d(4, 32, 5, stride=2), nn.ReLU(),
             nn.Conv2d(32, 64, 3, stride=2), nn.ReLU(),
@@ -86,6 +87,17 @@ class DoomNet(nn.Module):
             self.crumb_out = nn.Linear(64, hidden)
             nn.init.zeros_(self.crumb_out.weight)
             nn.init.zeros_(self.crumb_out.bias)
+        if mapping:
+            self.map_cnn = nn.Sequential(
+                nn.Conv2d(MAP_CHANNELS, 16, 3, stride=2, padding=1), nn.ReLU(),
+                nn.Conv2d(16, 32, 3, stride=2, padding=1), nn.ReLU(),
+                nn.Conv2d(32, 32, 3, stride=2, padding=1), nn.ReLU(),
+                nn.Flatten(),
+                nn.Linear(32 * (MAP_VIEW // 8) ** 2, 128), nn.ReLU(),
+            )
+            self.map_out = nn.Linear(128, hidden)
+            nn.init.zeros_(self.map_out.weight)
+            nn.init.zeros_(self.map_out.bias)
         self.gru = nn.GRUCell(hidden, hidden)
         self.policy = nn.Linear(hidden, sum(HEAD_SIZES))
         self.value = nn.Linear(hidden, 1)
@@ -112,6 +124,8 @@ class DoomNet(nn.Module):
         z = self.trunk(torch.cat([img, r, torch.cat([e_mean, e_max], -1), v], dim=-1))
         if self.use_crumbs:
             z = z + self.crumb_out(self.crumb_mlp(x["crumbs"]))
+        if self.use_map:
+            z = z + self.map_out(self.map_cnn(x["map"].float() / 255.0))
         if self.use_slots:
             z = z + self.read_slots(x["slots"], z)
         return z

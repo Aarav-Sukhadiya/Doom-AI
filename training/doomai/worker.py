@@ -25,9 +25,12 @@ TIER_COUNT = 4
 FREEDOOM_TIER = 5
 FREEDOOM_TRAIN_MAPS = 20
 FREEDOOM_TICKS = 4200
+FREEDOOM1_MAPS = [f"E{e}M{m}" for e in range(1, 5) for m in range(1, 10)]
+REAL_MAP_SKILLS = (1, 2, 3)
+REAL_MAP_SKILL_P = (0.25, 0.35, 0.4)
 
 
-def worker_main(remote, worker_id: int, envs_per_worker: int, difficulty, weights, seed: int, map_dir: str, reward_cfg: dict | None = None, hard_share: float = 0.0, freedoom_share: float = 0.0, entity_range: float = 1.0):
+def worker_main(remote, worker_id: int, envs_per_worker: int, difficulty, weights, seed: int, map_dir: str, reward_cfg: dict | None = None, hard_share: float = 0.0, freedoom_share: float = 0.0, entity_range: float = 1.0, mapping: bool = False):
     from doomai.envs.shaped import ShapedDoomEnv
     from doomai.maps.generate import generate, seeds_for
     from doomai.maps.grid import write_grid_wad
@@ -38,22 +41,34 @@ def worker_main(remote, worker_id: int, envs_per_worker: int, difficulty, weight
     build_rng = np.random.default_rng(seed + 7919)
     train_seeds = seeds_for("train", 200000)
     envs = [None] * envs_per_worker
-    trackers = [LandmarkTracker(entity_range) for _ in range(envs_per_worker)]
+    trackers = [LandmarkTracker(entity_range, mapping) for _ in range(envs_per_worker)]
     tiers = [0] * envs_per_worker
     plays = [0] * envs_per_worker
     counter = [0]
     builder = ThreadPoolExecutor(max_workers=1)
 
-    freedoom_iwad = None
+    real_maps = []
     if freedoom_share > 0:
         import vizdoom
 
-        freedoom_iwad = str(Path(vizdoom.__file__).parent / "freedoom2.wad")
+        vz = Path(vizdoom.__file__).parent
+        real_maps = [(str(vz / "freedoom2.wad"), f"MAP{k:02d}") for k in range(1, FREEDOOM_TRAIN_MAPS + 1)]
+        if (vz / "freedoom1.wad").exists():
+            real_maps += [(str(vz / "freedoom1.wad"), m) for m in FREEDOOM1_MAPS]
 
     def build(i):
-        if freedoom_iwad and build_rng.random() < freedoom_share:
-            map_name = f"MAP{int(build_rng.integers(1, FREEDOOM_TRAIN_MAPS + 1)):02d}"
-            return ShapedDoomEnv(freedoom_iwad, map_name, episode_ticks=FREEDOOM_TICKS, reward=reward_cfg), FREEDOOM_TIER
+        if real_maps and build_rng.random() < freedoom_share:
+            import doom_env.wrapper as wrapper
+
+            wad, map_name = real_maps[int(build_rng.integers(len(real_maps)))]
+            # Practice only: real maps sometimes on easier skills (fewer, weaker monsters) so the agent
+            # lives long enough to learn their layouts. Evaluation always uses the official skill 3.
+            wrapper.SKILL = int(build_rng.choice(REAL_MAP_SKILLS, p=REAL_MAP_SKILL_P))
+            try:
+                env = ShapedDoomEnv(wad, map_name, episode_ticks=FREEDOOM_TICKS, reward=reward_cfg)
+            finally:
+                wrapper.SKILL = 3
+            return env, FREEDOOM_TIER
         w = np.array(weights[:], np.float64)
         tier = int(build_rng.choice(TIER_COUNT, p=w / w.sum())) + 1
         if build_rng.random() < hard_share:

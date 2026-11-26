@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from landmarks import CRUMB_FEATURES, NUM_SLOTS, SLOT_FEATURES, LandmarkTracker
+from landmarks import CRUMB_FEATURES, MAP_CHANNELS, MAP_VIEW, NUM_SLOTS, SLOT_FEATURES, LandmarkTracker
 
 NUM_RAYS = 64
 NUM_HIT_TYPES = 6
@@ -68,6 +68,11 @@ def observe(obs: dict, tracker: LandmarkTracker, action) -> dict[str, np.ndarray
         out["crumbs"] = tracker.crumbs()
     except Exception:
         out["crumbs"] = np.zeros(CRUMB_FEATURES, np.float32)
+    if tracker.level_map is not None:
+        try:
+            out["map"] = tracker.map_view()
+        except Exception:
+            out["map"] = np.zeros((MAP_CHANNELS, MAP_VIEW, MAP_VIEW), np.uint8)
     return out
 
 

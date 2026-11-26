@@ -17,7 +17,7 @@ from landmarks import LandmarkTracker
 
 def trainer_actions(net, env, seed, steps):
     obs, _ = env.reset(seed=seed)
-    tracker = LandmarkTracker()
+    tracker = LandmarkTracker(mapping=net.use_map)
     last = None
     h = net.initial_state(1)
     prev = np.zeros((1, 9), np.float32)
@@ -52,17 +52,17 @@ def agent_actions(agent, env, seed, steps):
     return out
 
 
-@pytest.mark.parametrize("tier,slots,crumbs", [(2, False, False), (3, True, False), (4, True, True)])
-def test_trainer_and_submitted_agent_choose_identical_actions(tier, slots, crumbs, tmp_path, monkeypatch):
+@pytest.mark.parametrize("tier,slots,crumbs,mapping", [(2, False, False, False), (3, True, False, False), (4, True, True, False), (4, True, True, True)])
+def test_trainer_and_submitted_agent_choose_identical_actions(tier, slots, crumbs, mapping, tmp_path, monkeypatch):
     torch.manual_seed(7)
-    net = DoomNet(slots=slots, crumbs=crumbs).eval()
+    net = DoomNet(slots=slots, crumbs=crumbs, mapping=mapping).eval()
     with torch.no_grad():
         for p in net.parameters():
             p.add_(torch.randn_like(p) * 0.05)
     weights = tmp_path / "w"
     weights.mkdir()
     torch.save(net.state_dict(), weights / "model.pt")
-    (weights / "config.json").write_text(json.dumps({"greedy": True, "slots": slots, "crumbs": crumbs, "fire_mask": True}))
+    (weights / "config.json").write_text(json.dumps({"greedy": True, "slots": slots, "crumbs": crumbs, "map": mapping, "fire_mask": True}))
 
     import importlib.util
 
@@ -206,3 +206,45 @@ def test_crumbs_mark_ground_already_covered(tmp_path):
     n = len(CRUMB_RADII)
     ahead, behind = c[2 : 2 + n], c[2 + 4 * n : 2 + 5 * n]
     assert c[0] > 0 and ahead.max() == 0 and behind[:2].min() > 0
+
+
+def test_map_handover_is_exact():
+    torch.manual_seed(6)
+    base = DoomNet(slots=True, crumbs=True).eval()
+    with_map = DoomNet(slots=True, crumbs=True, mapping=True).eval()
+    missing, unexpected = with_map.load_state_dict(base.state_dict(), strict=False)
+    assert not unexpected and all(k.startswith("map_") for k in missing)
+    x = {k: torch.from_numpy(v) for k, v in stack([observe(S.observation_space().sample(), LandmarkTracker(mapping=True), None) for _ in range(8)]).items()}
+    x["map"] = torch.randint(0, 256, x["map"].shape, dtype=torch.uint8)
+    prev, h, allowed = torch.zeros(8, 9), torch.randn(8, base.hidden), torch.ones(8)
+    with torch.no_grad():
+        a = base(x, prev, h, allowed)
+        b = with_map(x, prev, h, allowed)
+    assert torch.equal(a[0], b[0]) and torch.equal(a[1], b[1])
+
+
+def test_level_map_shows_corridor_and_path(tmp_path):
+    import time
+
+    from landmarks import MAP_VIEW
+
+    env = make_env(str(write_grid_wad("####################\n#P.................E#\n####################", tmp_path / "m.wad")), "MAP01", episode_ticks=1000)
+    obs, _ = env.reset(seed=0)
+    tracker = LandmarkTracker(mapping=True)
+    tracker.observe(obs, None)
+    forward = np.array([1, 0, 0, 0, 0, 0, 0, 0, 0], np.int8)
+    t0 = time.perf_counter()
+    for _ in range(20):
+        obs, *_ = env.step(forward)
+        tracker.observe(obs, forward)
+        view = tracker.map_view()
+    per_step = (time.perf_counter() - t0) / 20
+    env.close()
+    assert view.shape == (4, MAP_VIEW, MAP_VIEW) and view.dtype == np.uint8
+    mid = MAP_VIEW // 2
+    ahead = view[:, : mid - 1, mid - 1 : mid + 1]
+    assert ahead[0].max() == 255
+    assert view[1, mid - 3 : mid + 3, :].max() == 255
+    assert view[3, mid:, mid - 1 : mid + 1].max() == 255
+    assert view[3, : mid - 3].max() == 0
+    assert per_step < 0.01
