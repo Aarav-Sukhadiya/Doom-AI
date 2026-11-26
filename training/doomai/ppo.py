@@ -314,6 +314,8 @@ def main(argv=None) -> None:
     torch.set_num_threads(1)
     torch.manual_seed(args.seed)
     device = torch.device(args.device)
+    torch.backends.cudnn.benchmark = True
+    torch.set_float32_matmul_precision("high")
     run_dir = REPO / "runs" / args.run
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "args.json").write_text(json.dumps(vars(args), indent=2))
