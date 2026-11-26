@@ -164,3 +164,25 @@ def test_firing_at_a_visible_enemy_is_not_idle(tmp_path):
     terms = env.step(ATTACK)[4]["reward_terms"]
     env.close()
     assert terms["idle_fire"] == 0.0
+
+
+def test_pickups_paid_once_and_weapon_detected(tmp_path):
+    result, events = run_walker(tmp_path, "#############\n#P.g.a.o...E#\n#############")
+    assert result["exit_reached"]
+    assert fired(events, "pickup_weapon") == [1.5]
+    assert len(fired(events, "pickup_ammo")) >= 2
+    assert fired(events, "pickup_armor") == [0.5]
+    assert fired(events, "pickup_health") == []
+    assert events[-1]["episode_stats"]["pickups"] >= 4
+
+
+def test_weapons_added_without_changing_layout():
+    from doomai.maps.generate import generate
+
+    with_weapon = 0
+    for seed in range(40):
+        level = generate(4, seed)
+        stripped = level.grid.replace("g", ".").replace("n", ".")
+        assert "g" not in stripped and "n" not in stripped
+        with_weapon += level.grid != stripped
+    assert 10 <= with_weapon <= 35

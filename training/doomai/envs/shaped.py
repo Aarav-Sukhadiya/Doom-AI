@@ -29,6 +29,10 @@ REWARD = {
     "death": -2.0,
     "death_early": -3.0,
     "ammo_used": -0.02,
+    "pickup_health": 0.02,
+    "pickup_armor": 0.005,
+    "pickup_ammo": 0.01,
+    "pickup_weapon": 1.5,
     "idle_fire": -0.02,
     "living": -0.001,
     "subgoal": 0.0,
@@ -40,6 +44,8 @@ LOOKUP_CELL = 16.0
 AMMO_SLICE = slice(S.VITALS_INDEX["ammo_bullets"], S.VITALS_INDEX["ammo_cells"] + 1)
 ENEMY_TYPES = np.array([i for i, t in enumerate(S.ENTITY_TYPES) if t.startswith("enemy")])
 SELECTED_AMMO = S.VITALS_INDEX["selected_weapon_ammo"]
+HEALTH = S.VITALS_INDEX["health"]
+ARMOR = S.VITALS_INDEX["armor"]
 KEY_SLICE = slice(S.VITALS_INDEX["key_blue_card"], S.VITALS_INDEX["key_red_skull"] + 1)
 
 
@@ -109,7 +115,11 @@ class ShapedDoomEnv(DoomEnv):
             "damage_dealt": self._game.get_game_variable(vd.GameVariable.DAMAGECOUNT),
             "keys": obs["vitals"][KEY_SLICE].copy(),
             "ammo": obs["vitals"][AMMO_SLICE].copy(),
+            "health": float(obs["vitals"][HEALTH]),
+            "armor": float(obs["vitals"][ARMOR]),
+            "weapons": self._weapons_owned(),
         }
+        self.pickups = 0
         self._visit(st)
         self._enemy_in_view = self._sees_enemy(obs)
         self._has_ammo = obs["vitals"][SELECTED_AMMO] > 0
@@ -117,6 +127,9 @@ class ShapedDoomEnv(DoomEnv):
         self.episode_steps = 0
         self._phi = self._potential(st, obs["vitals"])
         return obs, info
+
+    def _weapons_owned(self) -> int:
+        return sum(self._game.get_game_variable(getattr(vd.GameVariable, f"WEAPON{i}")) > 0 for i in range(2, 8))
 
     @staticmethod
     def _sees_enemy(obs) -> bool:
@@ -153,6 +166,18 @@ class ShapedDoomEnv(DoomEnv):
         terms["key"] = cfg["key"] * float(np.sum((keys > 0.5) & (self._prev["keys"] < 0.5)))
         ammo = obs["vitals"][AMMO_SLICE]
         terms["ammo_used"] = cfg["ammo_used"] * float(np.sum(np.maximum(0.0, self._prev["ammo"] - ammo)))
+        alive = not st["dead"]
+        health, armor = float(obs["vitals"][HEALTH]), float(obs["vitals"][ARMOR])
+        weapons = self._weapons_owned()
+        gains = {
+            "pickup_health": max(0.0, health - self._prev["health"]) if alive else 0.0,
+            "pickup_armor": max(0.0, armor - self._prev["armor"]) if alive else 0.0,
+            "pickup_ammo": float(np.sum(np.maximum(0.0, ammo - self._prev["ammo"]))) if alive else 0.0,
+            "pickup_weapon": float(max(0, weapons - self._prev["weapons"])),
+        }
+        for k, g in gains.items():
+            terms[k] = cfg[k] * g
+        self.pickups += sum(g > 0 for g in gains.values())
         fired_blind = bool(np.asarray(action)[6]) and not self._enemy_in_view and self._has_ammo
         terms["idle_fire"] = cfg["idle_fire"] * float(fired_blind)
         self._enemy_in_view = self._sees_enemy(obs)
@@ -179,7 +204,8 @@ class ShapedDoomEnv(DoomEnv):
         if st["dead"]:
             terms["death"] = cfg["death"] + cfg["death_early"] * left
 
-        self._prev.update(kills=st["kills"], damage_taken=st["damage_taken"], damage_dealt=dealt_now, keys=keys.copy(), ammo=ammo.copy())
+        self._prev.update(kills=st["kills"], damage_taken=st["damage_taken"], damage_dealt=dealt_now, keys=keys.copy(), ammo=ammo.copy(),
+                          health=health, armor=armor, weapons=weapons)
         for k, v in terms.items():
             self.episode_terms[k] = self.episode_terms.get(k, 0.0) + v
         info = dict(info, reward_terms=terms)
@@ -194,5 +220,6 @@ class ShapedDoomEnv(DoomEnv):
                 "keys": float(np.sum(keys > 0.5)),
                 "doors_opened": float(np.sum(self._opened)),
                 "steps": float(self.episode_steps),
+                "pickups": float(self.pickups),
             }
         return obs, float(sum(terms.values())), terminated, truncated, info

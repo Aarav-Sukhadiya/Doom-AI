@@ -340,6 +340,29 @@ EXPECTED_LOCKS = {1: 0, 2: 0, 3: 1, 4: 2}
 TICK_FLOOR = {1: 2100, 2: 3150, 3: 4200, 4: 4200}
 
 
+WEAPON_CHANCE = (("g", 0.5), ("n", 0.2))
+
+
+def _add_weapons(lines: list[str], wrng: random.Random) -> list[str]:
+    """Sometimes drop a shotgun and/or chaingun on open floor. Uses its own random stream, so the
+    layout, enemies and items of every level stay exactly as they were without weapons."""
+    rows = [list(line) for line in lines]
+    for ch, chance in WEAPON_CHANCE:
+        if wrng.random() >= chance:
+            continue
+        free = [
+            (r, c) for r, row in enumerate(rows) for c, cell in enumerate(row)
+            if cell == "." and all(
+                0 <= r + dr < len(rows) and 0 <= c + dc < len(rows[r + dr]) and rows[r + dr][c + dc] not in "DRBYEP"
+                for dr, dc in DIRS.values()
+            )
+        ]
+        if free:
+            r, c = wrng.choice(free)
+            rows[r][c] = ch
+    return ["".join(row) for row in rows]
+
+
 def _all_reachable(lines: list[str]) -> bool:
     start = next((r, c) for r, line in enumerate(lines) for c, ch in enumerate(line) if ch == "P")
     seen = {start}
@@ -377,6 +400,7 @@ def generate(tier: int, seed: int, difficulty: float = 1.0) -> Level:
             continue
         steps = moves * 2
         ticks = int(min(10500, max(TICK_FLOOR[tier], steps * 4 * 5)))
+        lines = _add_weapons(lines, random.Random(f"weapons-{tier}-{seed}-{difficulty:.3f}"))
         return Level("\n".join(lines), tier, seed, rng.randrange(0, 360, 45), ticks, exit_kind, locks, steps)
     raise RuntimeError(f"could not build a solvable tier {tier} level for seed {seed}")
 
