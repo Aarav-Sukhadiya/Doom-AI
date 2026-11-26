@@ -14,9 +14,9 @@ from doom_env import spaces as S
 from doom_env.wrapper import DoomEnv
 
 REWARD = {
-    "exit": 10.0,
+    "exit": 25.0,
     "exit_health_bonus": 2.0,
-    "exit_time_bonus": 2.0,
+    "exit_time_bonus": 5.0,
     "key": 3.0,
     "door": 1.0,
     "locked_door": 3.0,
@@ -24,7 +24,7 @@ REWARD = {
     "new_cell": 0.02,
     "new_cell_decay": 0.998,
     "kill": 1.0,
-    "damage_dealt": 0.01,
+    "damage_dealt": 0.005,
     "damage_taken": -0.01,
     "death": -2.0,
     "death_early": -3.0,
