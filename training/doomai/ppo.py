@@ -295,6 +295,7 @@ def main(argv=None) -> None:
     p.add_argument("--crumbs", action="store_true", help="breadcrumb memory input: how often the agent has been around here")
     p.add_argument("--map", action="store_true", help="level map memory input: 32x32 map built from rays and odometry")
     p.add_argument("--weapon", action="store_true", help="learned next-weapon action head")
+    p.add_argument("--space", action="store_true", help="room-around-me input: nearest wall and mean distance in 8 directions")
     p.add_argument("--entity-range", type=float, default=4.0, help="landmark distance cap for entities, in 1024-unit steps (1.0 before main10)")
     p.add_argument("--target-entropy", type=float, default=0.0, help="adapt the entropy coefficient to hold this policy entropy (0 = fixed --ent)")
     p.add_argument("--eval-every", type=int, default=200, help="score a snapshot on validation levels every N updates in the background (0 = off)")
@@ -327,8 +328,8 @@ def main(argv=None) -> None:
     writer.add_custom_scalars(LAYOUT)
     writer.add_text("guide", GUIDE, 0)
 
-    net = DoomNet(slots=args.slots, crumbs=args.crumbs, mapping=args.map, weapon=args.weapon).to(device)
-    (run_dir / "config.json").write_text(json.dumps({"slots": args.slots, "hidden": net.hidden, "fire_mask": args.fire_mask, "entity_range": args.entity_range, "crumbs": args.crumbs, "map": args.map, "weapon": args.weapon}))
+    net = DoomNet(slots=args.slots, crumbs=args.crumbs, mapping=args.map, weapon=args.weapon, space=args.space).to(device)
+    (run_dir / "config.json").write_text(json.dumps({"slots": args.slots, "hidden": net.hidden, "fire_mask": args.fire_mask, "entity_range": args.entity_range, "crumbs": args.crumbs, "map": args.map, "weapon": args.weapon, "space": args.space}))
 
     def batch(observations: list) -> dict:
         arrays = stack(observations)
@@ -355,7 +356,7 @@ def main(argv=None) -> None:
     elif args.init:
         state = torch.load(args.init, map_location=device, weights_only=False)
         missing, unexpected = net.load_state_dict(state["model"] if "model" in state else state, strict=False)
-        if unexpected or any(not k.startswith(("slot_", "crumb_", "map_", "weapon.")) for k in missing):
+        if unexpected or any(not k.startswith(("slot_", "crumb_", "map_", "weapon.", "space_")) for k in missing):
             raise RuntimeError(f"--init mismatch: missing {missing}, unexpected {unexpected}")
         print(f"initialised from {args.init}; new parameters: {missing}", flush=True)
 

@@ -26,7 +26,7 @@ class DoomAgent:
         self.fire_mask = bool(config.get("fire_mask", False))
         self.net = DoomNet(hidden=int(config.get("hidden", 256)), slots=bool(config.get("slots", False)),
                            crumbs=bool(config.get("crumbs", False)), mapping=bool(config.get("map", False)),
-                           weapon=bool(config.get("weapon", False)))
+                           weapon=bool(config.get("weapon", False)), space=bool(config.get("space", False)))
         self.tracker = LandmarkTracker(float(config.get("entity_range", 1.0)), mapping=bool(config.get("map", False)))
         weights = WEIGHTS_DIR / "model.pt"
         if weights.exists():

@@ -43,6 +43,7 @@ REWARD = {
     "living": -0.001,
     "subgoal": 0.0,
     "subgoal_exit_boost": 2.0,
+    "new_cell_exit_boost": 3.0,
 }
 
 DOOR_OPEN_GAP = 56.0
@@ -265,6 +266,10 @@ class ShapedDoomEnv(DoomEnv):
         if not st["finished"]:
             new_sector, cell_reward = self._visit(st)
             terms["new_sector"] = cfg["new_sector"] * new_sector
+            if self._subgoals is not None and self._subgoals.stages and self._stage == len(self._subgoals.stages) - 1:
+                # Final stretch: only the exit is left and no sensor shows it, so new ground is worth
+                # more than walking rooms it has already seen.
+                cell_reward *= cfg["new_cell_exit_boost"]
             terms["new_cell"] = cell_reward
             if self._subgoals is not None:
                 phi = self._potential(st, obs["vitals"])

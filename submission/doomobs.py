@@ -58,6 +58,21 @@ def preprocess(obs: dict) -> dict[str, np.ndarray]:
     }
 
 
+SPACE_SECTORS = 8
+SPACE_FEATURES = 2 * SPACE_SECTORS + 1
+
+
+def space(obs: dict) -> np.ndarray:
+    """Room around the agent from its 64 rays: for 8 directions (ahead first, then turning left) the
+    nearest hit and the mean distance in that 45-degree slice, plus the nearest hit straight ahead.
+    The rays hold all of this already; spelled out it is easier to learn 'back away from that wall'."""
+    d = np.clip(np.nan_to_num(np.asarray(obs["rays"]["distance"], np.float32), nan=1.0, posinf=1.0, neginf=1.0), 0.0, 1.0)
+    n = d.shape[0]
+    shifted = np.roll(d, n // (2 * SPACE_SECTORS)).reshape(SPACE_SECTORS, -1)
+    ahead = np.r_[d[-1:], d[:2]]
+    return np.concatenate([shifted.min(1), shifted.mean(1), [ahead.min()]]).astype(np.float32)
+
+
 def observe(obs: dict, tracker: LandmarkTracker, action) -> dict[str, np.ndarray]:
     """preprocess() plus landmark slot features; action is the one that led to obs (None after reset)."""
     out = preprocess(obs)
@@ -69,6 +84,10 @@ def observe(obs: dict, tracker: LandmarkTracker, action) -> dict[str, np.ndarray
         out["crumbs"] = tracker.crumbs()
     except Exception:
         out["crumbs"] = np.zeros(CRUMB_FEATURES, np.float32)
+    try:
+        out["space"] = space(obs)
+    except Exception:
+        out["space"] = np.ones(SPACE_FEATURES, np.float32)
     if tracker.level_map is not None:
         try:
             out["map"] = tracker.map_view()

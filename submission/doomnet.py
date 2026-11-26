@@ -37,6 +37,7 @@ from doomobs import (  # noqa: F401
     NUM_RAYS,
     NUM_VITALS,
     USE_COOLDOWN,
+    SPACE_FEATURES,
     USE_HEAD,
     VITAL_SCALE,
     WEAPON_HEAD,
@@ -52,9 +53,10 @@ def to_tensors(arrays: dict[str, np.ndarray], device) -> dict[str, torch.Tensor]
 
 
 class DoomNet(nn.Module):
-    def __init__(self, hidden: int = 256, slots: bool = False, crumbs: bool = False, mapping: bool = False, weapon: bool = False):
+    def __init__(self, hidden: int = 256, slots: bool = False, crumbs: bool = False, mapping: bool = False, weapon: bool = False, space: bool = False):
         super().__init__()
         self.use_weapon = weapon
+        self.use_space = space
         self.hidden = hidden
         self.use_slots = slots
         self.use_crumbs = crumbs
@@ -89,6 +91,11 @@ class DoomNet(nn.Module):
             self.crumb_out = nn.Linear(64, hidden)
             nn.init.zeros_(self.crumb_out.weight)
             nn.init.zeros_(self.crumb_out.bias)
+        if space:
+            self.space_mlp = nn.Sequential(nn.Linear(SPACE_FEATURES, 64), nn.ReLU())
+            self.space_out = nn.Linear(64, hidden)
+            nn.init.zeros_(self.space_out.weight)
+            nn.init.zeros_(self.space_out.bias)
         if mapping:
             self.map_cnn = nn.Sequential(
                 nn.Conv2d(MAP_CHANNELS, 16, 3, stride=2, padding=1), nn.ReLU(),
@@ -133,6 +140,8 @@ class DoomNet(nn.Module):
         z = self.trunk(torch.cat([img, r, torch.cat([e_mean, e_max], -1), v], dim=-1))
         if self.use_crumbs:
             z = z + self.crumb_out(self.crumb_mlp(x["crumbs"]))
+        if self.use_space:
+            z = z + self.space_out(self.space_mlp(x["space"]))
         if self.use_map:
             z = z + self.map_out(self.map_cnn(x["map"].float() / 255.0))
         if self.use_slots:

@@ -53,16 +53,17 @@ def agent_actions(agent, env, seed, steps):
 
 
 @pytest.mark.parametrize("tier,slots,crumbs,mapping,weapon", [(2, False, False, False, False), (3, True, False, False, False), (4, True, True, False, False), (4, True, True, True, False), (1, True, True, True, True)])
-def test_trainer_and_submitted_agent_choose_identical_actions(tier, slots, crumbs, mapping, weapon, tmp_path, monkeypatch):
+@pytest.mark.parametrize("space", [False, True])
+def test_trainer_and_submitted_agent_choose_identical_actions(tier, slots, crumbs, mapping, weapon, space, tmp_path, monkeypatch):
     torch.manual_seed(7)
-    net = DoomNet(slots=slots, crumbs=crumbs, mapping=mapping, weapon=weapon).eval()
+    net = DoomNet(slots=slots, crumbs=crumbs, mapping=mapping, weapon=weapon, space=space).eval()
     with torch.no_grad():
         for p in net.parameters():
             p.add_(torch.randn_like(p) * 0.05)
     weights = tmp_path / "w"
     weights.mkdir()
     torch.save(net.state_dict(), weights / "model.pt")
-    (weights / "config.json").write_text(json.dumps({"greedy": True, "slots": slots, "crumbs": crumbs, "map": mapping, "weapon": weapon, "fire_mask": True}))
+    (weights / "config.json").write_text(json.dumps({"greedy": True, "slots": slots, "crumbs": crumbs, "map": mapping, "weapon": weapon, "space": space, "fire_mask": True}))
 
     import importlib.util
 
@@ -75,11 +76,35 @@ def test_trainer_and_submitted_agent_choose_identical_actions(tier, slots, crumb
     level = generate(tier, 123)
     path = str(write_grid_wad(level.grid, tmp_path / "m.wad", player_angle=level.player_angle))
     env = make_env(path, "MAP01", episode_ticks=level.episode_ticks)
-    a = trainer_actions(net, env, 5, 100)
-    b = agent_actions(agent, env, 5, 100)
+    # Both sides see the same game step by step. Their outputs must agree to float rounding, and
+    # their actions must agree wherever the choice is not a near-tie (two options within 1e-4,
+    # where rounding in a different kernel path may pick either).
+    obs, _ = env.reset(seed=5)
+    agent.reset()
+    tracker = LandmarkTracker(mapping=net.use_map)
+    last, h = None, net.initial_state(1)
+    prev, use_cd = np.zeros((1, 9), np.float32), np.zeros(1, np.int64)
+    seen = {}
+    orig = agent.net.forward
+    agent.net.forward = lambda *a, **k: seen.__setitem__("out", orig(*a, **k)) or seen["out"]
+    for _ in range(100):
+        with torch.no_grad():
+            logits, _, h = net(to_tensors(stack([observe(obs, tracker, last)]), "cpu"), torch.from_numpy(prev), h,
+                               torch.from_numpy((use_cd == 0).astype(np.float32)))
+        action = decode_action(sample(logits, greedy=True).numpy())
+        agent_action = agent.act(obs)
+        assert torch.allclose(seen["out"][0], logits, atol=1e-5)
+        margins = [torch.topk(p, 2).values for p in torch.split(logits[0], doomnet.HEAD_SIZES)]
+        if all(float(v[0] - v[1]) > 1e-4 for v in margins):
+            assert np.array_equal(action[0], agent_action)
+        last = action[0].copy()
+        use_cd = np.where(action[:, 7] == 1, USE_COOLDOWN, np.maximum(use_cd - 1, 0))
+        prev = action.astype(np.float32)
+        agent.prev_action, agent.use_cooldown = prev[0].copy(), int(use_cd[0])
+        obs, _, term, trunc, _ = env.step(action[0])
+        if term or trunc:
+            break
     env.close()
-    assert len(a) == len(b)
-    assert all(np.array_equal(x, y) for x, y in zip(a, b))
     assert doomnet.NUM_BUTTONS == len(S.BUTTONS)
 
 
@@ -267,3 +292,28 @@ def test_weapon_head_handover():
     choice = doomnet.sample(a[0])
     assert torch.all(choice[:, 5] == 0)
     assert not decode_action(choice.numpy())[:, 8].any()
+
+
+def test_space_handover_and_features():
+    from doomobs import SPACE_FEATURES, space
+
+    torch.manual_seed(9)
+    base = DoomNet(slots=True, crumbs=True, mapping=True, weapon=True).eval()
+    with_space = DoomNet(slots=True, crumbs=True, mapping=True, weapon=True, space=True).eval()
+    missing, unexpected = with_space.load_state_dict(base.state_dict(), strict=False)
+    assert not unexpected and all(k.startswith("space_") for k in missing)
+    x = {k: torch.from_numpy(v) for k, v in stack([observe(S.observation_space().sample(), LandmarkTracker(mapping=True), None) for _ in range(8)]).items()}
+    prev, h, allowed = torch.zeros(8, 9), torch.randn(8, base.hidden), torch.ones(8)
+    with torch.no_grad():
+        a = base(x, prev, h, allowed)
+        b = with_space(x, prev, h, allowed)
+    assert torch.equal(a[0], b[0]) and torch.equal(a[1], b[1])
+    obs = S.observation_space().sample()
+    d = np.ones(64, np.float32)
+    d[0] = 0.05
+    d[16] = 0.3
+    obs["rays"]["distance"] = d
+    f = space(obs)
+    assert f.shape == (SPACE_FEATURES,)
+    assert abs(f[0] - 0.05) < 1e-6 and abs(f[-1] - 0.05) < 1e-6
+    assert abs(f[2] - 0.3) < 1e-6 and f[4] == 1.0
