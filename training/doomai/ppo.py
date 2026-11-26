@@ -238,6 +238,7 @@ def main(argv=None) -> None:
     p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     p.add_argument("--save-every", type=int, default=10)
     p.add_argument("--slots", action="store_true", help="enable the landmark slot memory read path")
+    p.add_argument("--target-entropy", type=float, default=0.0, help="adapt the entropy coefficient to hold this policy entropy (0 = fixed --ent)")
     args = p.parse_args(argv)
 
     torch.set_num_threads(1)
@@ -292,6 +293,7 @@ def main(argv=None) -> None:
     start = time.time()
     deadline = start + args.hours * 3600
 
+    ent_coef = args.ent
     while time.time() < deadline and (not args.max_updates or update < args.max_updates):
         if (run_dir / "STOP").exists():
             print("STOP file found: saving and shutting down", flush=True)
@@ -380,7 +382,7 @@ def main(argv=None) -> None:
                 ratio = torch.exp(lp - old)
                 pg = -torch.min(ratio * a, ratio.clamp(1 - args.clip, 1 + args.clip) * a).mean()
                 vf = 0.5 * (val - ret).pow(2).mean()
-                loss = pg + args.vf * vf - args.ent * ent.mean()
+                loss = pg + args.vf * vf - ent_coef * ent.mean()
                 if not torch.isfinite(loss):
                     bad_update = True
                     break
@@ -413,6 +415,9 @@ def main(argv=None) -> None:
 
         update += 1
         total_steps += T * B
+        if args.target_entropy > 0 and stats["ent"]:
+            step = 1.05 if np.mean(stats["ent"]) < args.target_entropy else 1 / 1.05
+            ent_coef = float(np.clip(ent_coef * step, 1e-4, 0.05))
         for tier in args.tiers:
             hist = tier_hist[tier]
             if len(hist) >= 30:
@@ -437,6 +442,7 @@ def main(argv=None) -> None:
             if v:
                 w.add_scalar(f"ppo/{k}", float(np.mean(v)), update)
         w.add_scalar("ppo/explained_variance", ev, update)
+        w.add_scalar("ppo/entropy_coef", ent_coef, update)
         w.add_scalar("ppo/return_std", ret_norm.std, update)
         w.add_scalar("health/worker_restarts", restarts_total, update)
         for tier in range(1, TIER_COUNT + 1):
