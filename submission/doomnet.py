@@ -22,86 +22,30 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-from landmarks import NUM_SLOTS, SLOT_FEATURES, LandmarkTracker
-
-NUM_RAYS = 64
-NUM_HIT_TYPES = 6
-MAX_ENTITIES = 32
-NUM_ENTITY_FEATURES = 5
-NUM_ENTITY_TYPES = 12
-NUM_VITALS = 17
-NUM_BUTTONS = 9
-IMG_SHAPE = (4, 60, 80)
-
-VITAL_SCALE = np.array(
-    [100, 100, 7, 50, 200, 50, 50, 300, 1, 1, 1, 1, 1, 1, 16, 16, 16], np.float32
+from doomobs import (  # noqa: F401
+    HEAD_SIZES,
+    HEADS,
+    IMG_SHAPE,
+    MAX_ENTITIES,
+    NUM_BUTTONS,
+    NUM_ENTITY_FEATURES,
+    NUM_ENTITY_TYPES,
+    NUM_HIT_TYPES,
+    NUM_RAYS,
+    NUM_VITALS,
+    USE_COOLDOWN,
+    USE_HEAD,
+    VITAL_SCALE,
+    decode_action,
+    encode_prev_action,
+    observe,
+    preprocess,
+    stack,
 )
-
-HEADS = (("move", 3), ("strafe", 3), ("turn", 3), ("attack", 2), ("use", 2))
-HEAD_SIZES = [n for _, n in HEADS]
-USE_HEAD = 4
-USE_COOLDOWN = 8
-
-
-def preprocess(obs: dict) -> dict[str, np.ndarray]:
-    """One observation -> compact numpy arrays (uint8 image, float32 rest)."""
-    rgb = obs["rgb"][::2, ::2]
-    depth = obs["depth"][::2, ::2, None]
-    image = np.ascontiguousarray(np.concatenate([rgb, depth], axis=2).transpose(2, 0, 1), dtype=np.uint8)
-    rays = obs["rays"]
-    hit = np.asarray(rays["hit_type"], np.int64).clip(0, NUM_HIT_TYPES - 1)
-    ray = np.zeros((1 + NUM_HIT_TYPES, NUM_RAYS), np.float32)
-    ray[0] = np.nan_to_num(np.asarray(rays["distance"], np.float32), nan=1.0).clip(0.0, 1.0)
-    ray[1 + hit, np.arange(NUM_RAYS)] = 1.0
-    ents = obs["visible_entities"]
-    feats = np.nan_to_num(np.asarray(ents["features"], np.float32), nan=0.0, posinf=0.0, neginf=0.0).clip(-4.0, 4.0)
-    etype = np.asarray(ents["entity_type"], np.int64).clip(0, NUM_ENTITY_TYPES - 1)
-    emask = np.asarray(ents["mask"], np.float32).clip(0.0, 1.0)
-    vitals = np.nan_to_num(np.asarray(obs["vitals"], np.float32), nan=0.0, posinf=0.0, neginf=0.0) / VITAL_SCALE
-    return {
-        "image": image,
-        "rays": ray,
-        "ent_feat": feats,
-        "ent_type": etype,
-        "ent_mask": emask,
-        "vitals": vitals.clip(-10.0, 10.0),
-    }
-
-
-def observe(obs: dict, tracker: LandmarkTracker, action) -> dict[str, np.ndarray]:
-    """preprocess() plus landmark slot features; action is the one that led to obs (None after reset)."""
-    out = preprocess(obs)
-    try:
-        out["slots"] = tracker.observe(obs, action)
-    except Exception:
-        out["slots"] = np.zeros((NUM_SLOTS, SLOT_FEATURES), np.float32)
-    return out
-
-
-def stack(batch: list[dict[str, np.ndarray]]) -> dict[str, np.ndarray]:
-    return {k: np.stack([b[k] for b in batch]) for k in batch[0]}
-
+from landmarks import NUM_SLOTS, SLOT_FEATURES, LandmarkTracker  # noqa: F401
 
 def to_tensors(arrays: dict[str, np.ndarray], device) -> dict[str, torch.Tensor]:
     return {k: torch.from_numpy(np.ascontiguousarray(v)).to(device, non_blocking=True) for k, v in arrays.items()}
-
-
-def decode_action(choice: np.ndarray) -> np.ndarray:
-    """(B, 5) head choices -> (B, 9) MultiBinary buttons."""
-    choice = np.asarray(choice)
-    out = np.zeros((choice.shape[0], NUM_BUTTONS), np.int8)
-    rows = np.arange(choice.shape[0])
-    for head, (lo, hi) in enumerate(((0, 1), (2, 3), (4, 5))):
-        c = choice[:, head]
-        out[rows[c == 1], lo] = 1
-        out[rows[c == 2], hi] = 1
-    out[:, 6] = choice[:, 3] == 1
-    out[:, 7] = choice[:, 4] == 1
-    return out
-
-
-def encode_prev_action(buttons: np.ndarray) -> np.ndarray:
-    return np.asarray(buttons, np.float32).reshape(-1, NUM_BUTTONS)
 
 
 class DoomNet(nn.Module):

@@ -33,8 +33,9 @@ import torch
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "submission"))
 
-from doomnet import USE_COOLDOWN, DoomNet, decode_action, log_prob_entropy, observe, sample, stack, to_tensors  # noqa: E402
-from landmarks import LandmarkTracker  # noqa: E402
+from doomnet import USE_COOLDOWN, DoomNet, decode_action, log_prob_entropy, sample, stack, to_tensors  # noqa: E402
+
+from doomai.worker import worker_main  # noqa: E402
 
 TIER_COUNT = 4
 KL_BAND = (0.005, 0.03)
@@ -97,97 +98,12 @@ LAYOUT = {
 }
 
 
-def worker_main(remote, worker_id: int, envs_per_worker: int, difficulty, weights, seed: int, map_dir: str):
-    torch.set_num_threads(1)
-    from doomai.envs.shaped import ShapedDoomEnv
-    from doomai.maps.generate import generate, seeds_for
-    from doomai.maps.grid import write_grid_wad
-
-    from concurrent.futures import ThreadPoolExecutor
-
-    rng = np.random.default_rng(seed)
-    build_rng = np.random.default_rng(seed + 7919)
-    train_seeds = seeds_for("train", 200000)
-    envs = [None] * envs_per_worker
-    trackers = [LandmarkTracker() for _ in range(envs_per_worker)]
-    tiers = [0] * envs_per_worker
-    plays = [0] * envs_per_worker
-    counter = [0]
-    builder = ThreadPoolExecutor(max_workers=1)
-
-    def build(i):
-        w = np.array(weights[:], np.float64)
-        tier = int(build_rng.choice(TIER_COUNT, p=w / w.sum())) + 1
-        d = float(np.clip(difficulty[tier - 1] + build_rng.normal(0, 0.1), 0.0, 1.0))
-        level = generate(tier, int(build_rng.choice(train_seeds)), difficulty=round(d, 2))
-        counter[0] += 1
-        path = Path(map_dir) / f"w{worker_id}_e{i}_{counter[0]}.wad"
-        write_grid_wad(level.grid, path, player_angle=level.player_angle)
-        return ShapedDoomEnv(str(path), "MAP01", episode_ticks=level.episode_ticks), tier
-
-    pending = [builder.submit(build, i) for i in range(envs_per_worker)]
-
-    def new_level(i):
-        env, tier = pending[i].result()
-        pending[i] = builder.submit(build, i)
-        if envs[i] is not None:
-            old = Path(envs[i].wad)
-            envs[i].close()
-            old.unlink(missing_ok=True)
-        envs[i] = env
-        tiers[i] = tier
-        plays[i] = 0
-
-    def reset(i):
-        if envs[i] is None or plays[i] >= 2:
-            new_level(i)
-        plays[i] += 1
-        obs, _ = envs[i].reset(seed=int(rng.integers(1 << 30)))
-        trackers[i].reset()
-        return observe(obs, trackers[i], None)
-
-    try:
-        while True:
-            cmd, data = remote.recv()
-            if cmd == "reset":
-                remote.send([reset(i) for i in range(envs_per_worker)])
-            elif cmd == "step":
-                out = []
-                for i, action in enumerate(data):
-                    obs, reward, term, trunc, info = envs[i].step(action)
-                    done = term or trunc
-                    stats = None
-                    if done:
-                        stats = dict(info["episode_stats"], tier=tiers[i], terms=info["episode_terms"], cap=envs[i].episode_ticks / 4)
-                        pre = reset(i)
-                    else:
-                        pre = observe(obs, trackers[i], action)
-                    out.append((pre, reward, done, stats))
-                remote.send(out)
-            elif cmd == "close":
-                break
-    except (EOFError, KeyboardInterrupt):
-        pass
-    except Exception:
-        traceback.print_exc()
-        remote.send(("error", traceback.format_exc()))
-    finally:
-        for env in envs:
-            if env is not None:
-                env.close()
-        for f in pending:
-            try:
-                f.result()[0].close()
-            except Exception:
-                pass
-        builder.shutdown(wait=False)
-
-
 class Workers:
     def __init__(self, n: int, per: int, difficulty, weights, seed: int, map_dir: str):
         self.n, self.per = n, per
         self.difficulty, self.weights, self.seed, self.map_dir = difficulty, weights, seed, map_dir
         self.ctx = mp.get_context("forkserver")
+        self.ctx.set_forkserver_preload(["doomai.worker"])
         self.remotes, self.procs = [None] * n, [None] * n
         for i in range(n):
             self._start(i, seed + i)
