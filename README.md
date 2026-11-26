@@ -1,88 +1,93 @@
-# devforge-doom-template
+# Doom-AI: an agent that learns to play DOOM levels it has never seen
 
-Starter template for **Yugaantar 2026 · DevForge — Track 1: "Can It Play DOOM?"**
+**Yugaantar 2026 · DevForge · Track 1: "Can It Play DOOM?"**
 
-> For decades, *"Can it run DOOM?"* was the ultimate hardware test. Now: **can your neural network
-> actually play DOOM?** Train an agent that plays unseen levels **zero-shot**: survive ambushes,
-> navigate multi-room layouts, find keycards, unlock doors and reach the exit.
+## 1. Mission
 
-No dataset is provided. Your agent learns by interacting with the engine.
+For decades, *"Can it run DOOM?"* was the classic test for hardware. This hackathon flips the question:
+**can a neural network actually play DOOM?**
 
-## Quickstart
+Most game bots break the moment a wall moves or an enemy appears somewhere new, because they memorise a fixed
+sequence of button presses. Our goal is an agent that plays **levels it has never seen before**. It should survive
+ambushes, find its way through rooms connected by doors, pick up keycards, remember which door each key opens,
+and reach the exit.
 
-1. Click **"Use this template"** on GitHub to create your team's (public) repository.
-2. Set up the environment (Python 3.13, [uv](https://docs.astral.sh/uv/)):
+Nobody gives the agent a dataset or a map. It learns only by playing, again and again, and finding out what works.
 
-   ```bash
-   uv sync                 # installs vizdoom, gymnasium and the official wrapper (env/) in editable mode
-   uv run python validate.py
-   ```
+## 2. What makes our agent different (our USP)
 
-   Or use the official image, which is exactly what the scorer runs:
+**It remembers places, not button sequences.**
 
-   ```bash
-   docker build -t devforge-doom .            # or: docker pull <official image tag, announced>
-   python validate.py --docker --image devforge-doom   # installs requirements.txt, then runs sandboxed like the scorer
-   ```
+A person playing DOOM for the first time remembers things like *"there was a red locked door back near the start"*.
+Once they find the red key, they head back to that door. Our agent does the same. It has a small **landmark memory**:
 
-3. Replace the random baseline in `submission/agent.py` with your trained agent.
-4. Put weights in `submission/weights/` (Git LFS) and training code in `training/`.
-5. Run `python validate.py --docker` and submit your repo URL.
+- When it **sees** something important, such as a locked door, a keycard or the exit, it writes a note into a memory slot.
+- Each note records **where the thing was**. The agent works out its own position from its movements, the way you
+  can count your steps in a dark room, because the game never tells it its coordinates.
+- Later, when it picks up a key, it can **look up** where the matching door was and head back there.
 
-**Platforms:** Linux (x86-64/ARM), macOS on Apple Silicon (macOS 15+) and Windows (x86-64) all
-work with `uv sync` and `validate.py`. Intel Macs have no `vizdoom` 1.3.3 wheel: use Docker or a
-Linux machine. Evaluation runs on Linux, so `validate.py --docker` is the closest check.
+The memory is part of the neural network and is learned, not hand-written rules. That matters because the
+competition only allows decisions made by trained networks.
 
-## Repository layout
+## 3. How it works, in plain words
 
-```
-env/                  official ViZDoom Gymnasium wrapper (doom_env): spaces, sensors, protocol, limits
-maps/                 one small test map (NOT an evaluation map); bring your own for training
-submission/agent.py   your DoomAgent: the evaluation entry point
-submission/weights/   model weights (Git LFS)
-training/             your training pipeline
-validate.py           run before submitting
-tests/                tests for the wrapper and validator (uv run pytest)
-docs/                 contract, rules, submission guide, evaluation details
-```
+| Part | What it does | Everyday comparison |
+| --- | --- | --- |
+| **Senses** | Each step the agent gets 64 "feelers" around it that report what they touch (wall, door, locked door, enemy, item), a list of visible enemies and items, its health, ammo and keys, and a small screen image. | Like walking with your eyes open and your arms out |
+| **Memory** | A short-term memory carries what just happened. The landmark memory keeps the important places it has seen. | Remembering *"the red door is behind me, to the left"* |
+| **Brain** | A compact neural network turns the senses and the memory into button presses: move, turn, shoot, open doors. | Deciding what to do next |
+| **Learning** | The agent plays thousands of practice levels. Exploring new rooms, collecting keys, opening locked doors and reaching the exit earn points; dying loses points. Over time it keeps what earns points. | Practising a game until you get good at it |
+| **Practice levels** | We built our own level maker. It generates endless new layouts, from easy (one room, walk to the exit) to hard (several rooms, locked doors, keys hidden down side branches, enemies). | A coach setting harder drills each week |
 
-## Using the environment
+Because the agent practises on thousands of different generated levels, it can't memorise any one of them. It has to
+learn skills that carry over to levels it has never seen, and the competition tests exactly that.
 
-```python
-from doom_env import make_env
+## 4. Progress
 
-env = make_env("maps/two_rooms.wad")     # test map; use your own maps for training
-obs, info = env.reset(seed=0)
-obs, reward, terminated, truncated, info = env.step(env.action_space.sample())
-```
-
-Observations are a dict of `rgb`, `depth`, `vitals`, `rays` and `visible_entities`, all
-ego-centric and partially observable. See [docs/CONTRACT.md](docs/CONTRACT.md).
-The wrapper's `reward` is a basic default for convenience. Shape your own reward for training.
-
-**Compute tip:** training only on raw pixels is expensive. The `rays`, `visible_entities` and
-`vitals` signals run thousands of steps per second on a CPU. Hybrid pixel + spatial models are welcome.
-
-## Hardware at evaluation
-
-One NVIDIA **RTX 3090 (24 GB)** shared between evaluation workers. Each agent gets **2 GB VRAM,
-8 GB RAM and 1 CPU thread**, so keep models compact and inference fast
-(see [hardware](docs/EVALUATION.md#hardware) and [timeouts](docs/EVALUATION.md#timeouts)).
-`validate.py` runs your agent under the same CPU/RAM limits and reports GPU memory.
-
-## Documentation
-
-| Doc | What's inside |
+| Step | Status |
 | --- | --- |
-| [docs/CONTRACT.md](docs/CONTRACT.md) | Observation/action spaces and the `DoomAgent` interface |
-| [docs/RULES.md](docs/RULES.md) | Ground rules: what's allowed, what gets you disqualified |
-| [docs/SUBMISSION.md](docs/SUBMISSION.md) | Submission checklist, Git LFS, 1 GB limit, `requirements.txt` |
-| [docs/EVALUATION.md](docs/EVALUATION.md) | Map tiers, scoring categories, timeouts, replays |
+| Project plan and test plan | ✅ Done |
+| Set-up checks (official tests, submission validator, GPU) | ✅ All passing |
+| Level maker: turns simple text drawings into real DOOM levels, matches the organisers' test levels exactly, supports doors, coloured locked doors, keys, enemies, items and both kinds of exit | ✅ Done |
+| Step counting: the agent can estimate where it is from its own movements (about 1% error after 500 steps) | ✅ Done |
+| Speed check: the game runs about 16,000 agent decisions per second on our laptop | ✅ Done |
+| Random level generator (easy to hard) | 🔄 In progress |
+| Neural network, landmark memory and learning loop | ⏳ Next |
+| Training, testing on unseen levels, final agent | ⏳ Overnight |
 
-## Rules in one minute
+## 5. Submission
 
-- Actions must come from **trained neural parameters**: no rule trees, no `A*`/Dijkstra, no `atan2` aimbots,
-  no unmodified off-the-shelf SB3.
-- Change anything you want **during training**. Evaluation uses the **vanilla engine**, the
-  official wrapper and **unseen maps**.
-- Create the repo during the hackathon. Libraries are fine; the core architecture and training must be yours.
+| Required | Where |
+| --- | --- |
+| Public GitHub repository with the full source code, trained weights and the track entry point | This repository. The agent the organisers run is `submission/agent.py`. |
+| 2-page project brief (PDF): USP, system architecture, technical approach | Added to this repository before the deadline |
+
+## 6. Playing by the rules
+
+- Every move the agent makes comes from its **trained neural network**. There are no hand-written "if you see X,
+  do Y" rules, no path-finding algorithms and no auto-aim.
+- During **practice** we may change anything (custom levels, extra hints for scoring). During **evaluation** the
+  agent sees only what any player sees, through the organisers' official setup, on levels it has never seen.
+- All of the agent's design and training code was written during the hackathon and lives in this repository.
+
+## 7. Where things are
+
+```
+submission/agent.py     the agent the organisers run
+submission/weights/     the trained network (stored with Git LFS)
+training/               everything used to build and train it (level maker, step counting, learning loop)
+maps/                   the organisers' small test level
+env/, docs/, tests/     the organisers' official game wrapper, rules and tests (unchanged)
+validate.py             the organisers' pre-submission checker
+```
+
+## 8. For developers
+
+```bash
+uv sync --group train          # Python 3.13; installs ViZDoom, the official wrapper, torch and tensorboard
+uv run pytest                  # official tests plus ours
+uv run python validate.py      # the organisers' submission checks
+```
+
+The official rules, scoring and the technical contract are in [docs/](docs/). This repository was created from the
+organisers' starter template.
