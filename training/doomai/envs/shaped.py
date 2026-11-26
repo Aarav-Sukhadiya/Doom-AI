@@ -28,7 +28,8 @@ REWARD = {
     "damage_taken": -0.01,
     "death": -2.0,
     "death_early": -3.0,
-    "ammo_used": -0.005,
+    "ammo_used": -0.02,
+    "idle_fire": -0.02,
     "living": -0.001,
     "subgoal": 0.0,
 }
@@ -37,6 +38,8 @@ DOOR_OPEN_GAP = 56.0
 CELL = 64.0
 LOOKUP_CELL = 16.0
 AMMO_SLICE = slice(S.VITALS_INDEX["ammo_bullets"], S.VITALS_INDEX["ammo_cells"] + 1)
+ENEMY_TYPES = np.array([i for i, t in enumerate(S.ENTITY_TYPES) if t.startswith("enemy")])
+SELECTED_AMMO = S.VITALS_INDEX["selected_weapon_ammo"]
 KEY_SLICE = slice(S.VITALS_INDEX["key_blue_card"], S.VITALS_INDEX["key_red_skull"] + 1)
 
 
@@ -108,10 +111,18 @@ class ShapedDoomEnv(DoomEnv):
             "ammo": obs["vitals"][AMMO_SLICE].copy(),
         }
         self._visit(st)
+        self._enemy_in_view = self._sees_enemy(obs)
+        self._has_ammo = obs["vitals"][SELECTED_AMMO] > 0
         self.episode_terms = {}
         self.episode_steps = 0
         self._phi = self._potential(st, obs["vitals"])
         return obs, info
+
+    @staticmethod
+    def _sees_enemy(obs) -> bool:
+        ents = obs["visible_entities"]
+        mask = np.asarray(ents["mask"]) > 0
+        return bool(np.isin(np.asarray(ents["entity_type"])[mask], ENEMY_TYPES).any())
 
     def _visit(self, st) -> tuple[int, float]:
         sector = self._locator.locate(st["x"], st["y"])
@@ -142,6 +153,10 @@ class ShapedDoomEnv(DoomEnv):
         terms["key"] = cfg["key"] * float(np.sum((keys > 0.5) & (self._prev["keys"] < 0.5)))
         ammo = obs["vitals"][AMMO_SLICE]
         terms["ammo_used"] = cfg["ammo_used"] * float(np.sum(np.maximum(0.0, self._prev["ammo"] - ammo)))
+        fired_blind = bool(np.asarray(action)[6]) and not self._enemy_in_view and self._has_ammo
+        terms["idle_fire"] = cfg["idle_fire"] * float(fired_blind)
+        self._enemy_in_view = self._sees_enemy(obs)
+        self._has_ammo = obs["vitals"][SELECTED_AMMO] > 0
 
         gap = st["sector_ceiling"] - st["sector_floor"]
         newly_open = (self._door >= 0) & ~self._opened & (gap >= DOOR_OPEN_GAP)

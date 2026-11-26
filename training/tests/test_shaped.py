@@ -144,3 +144,23 @@ def test_subgoal_shaping_penalises_walking_away(tmp_path):
 def test_subgoal_shaping_off_by_default(tmp_path):
     result, events = run_walker(tmp_path, "##########\n#P..D...E#\n##########")
     assert all("subgoal" not in e["reward_terms"] for e in events)
+
+
+def test_firing_with_no_enemy_in_view_is_penalised(tmp_path):
+    env = ShapedDoomEnv(str(write_grid_wad("#########\n#P......#\n#########", tmp_path / "m.wad")), "MAP01", episode_ticks=400)
+    env.reset(seed=0)
+    idle = ammo = 0.0
+    for _ in range(10):
+        terms = env.step(ATTACK)[4]["reward_terms"]
+        idle += terms["idle_fire"]
+        ammo += terms["ammo_used"]
+    env.close()
+    assert idle < 0 and ammo < 0
+
+
+def test_firing_at_a_visible_enemy_is_not_idle(tmp_path):
+    env = ShapedDoomEnv(str(write_grid_wad("#########\n#P.....z#\n#########", tmp_path / "m.wad")), "MAP01", episode_ticks=400)
+    env.reset(seed=0)
+    terms = env.step(ATTACK)[4]["reward_terms"]
+    env.close()
+    assert terms["idle_fire"] == 0.0
