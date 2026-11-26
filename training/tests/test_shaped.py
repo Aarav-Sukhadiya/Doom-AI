@@ -93,3 +93,54 @@ def test_observations_match_official_env(tmp_path):
             break
     a.close()
     b.close()
+
+
+def _walk_with_subgoal(tmp_path, grid, scale=0.05):
+    import re
+
+    from doomai.envs.subgoals import Subgoals
+
+    clean = re.sub("[zscidkl]", ".", grid)
+    env = ShapedDoomEnv(str(write_grid_wad(clean, tmp_path / "m.wad")), "MAP01", episode_ticks=8000,
+                        reward={"subgoal": scale}, subgoal_grid=clean)
+    env.reset(seed=0)
+    events = []
+    step = env.step
+
+    def logged(action):
+        out = step(action)
+        events.append(out[4])
+        return out
+
+    env.step = logged
+    result = walk(env, clean.splitlines(), solve_path(clean.splitlines()))
+    env.close()
+    return result, events, Subgoals(clean)
+
+
+def test_subgoal_shaping_rewards_progress_through_key_lock_exit(tmp_path):
+    from doomai.maps.generate import generate
+
+    for tier in (3, 4):
+        level = generate(tier, 9, difficulty=0.5)
+        result, events, sub = _walk_with_subgoal(tmp_path, level.grid)
+        assert result["exit_reached"]
+        shaping = [e["reward_terms"].get("subgoal", 0.0) for e in events]
+        assert sum(shaping) > 0.05 * (len(sub.stages) - 1) * sub.d_max * 0.5
+        assert sub.stages[-1][0] == "exit" and len(sub.stages) == 1 + 2 * (tier - 2)
+
+
+def test_subgoal_shaping_penalises_walking_away(tmp_path):
+    grid = "############\n#.....P..r.R...E#\n############"
+    env = ShapedDoomEnv(str(write_grid_wad(grid, tmp_path / "m.wad")), "MAP01", episode_ticks=400,
+                        reward={"subgoal": 0.05}, subgoal_grid=grid)
+    env.reset(seed=0)
+    back = np.array([0, 1, 0, 0, 0, 0, 0, 0, 0], np.int8)
+    total = sum(env.step(back)[4]["reward_terms"]["subgoal"] for _ in range(20))
+    env.close()
+    assert total < 0
+
+
+def test_subgoal_shaping_off_by_default(tmp_path):
+    result, events = run_walker(tmp_path, "##########\n#P..D...E#\n##########")
+    assert all("subgoal" not in e["reward_terms"] for e in events)

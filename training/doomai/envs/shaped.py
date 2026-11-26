@@ -30,6 +30,7 @@ REWARD = {
     "death_early": -3.0,
     "ammo_used": -0.005,
     "living": -0.001,
+    "subgoal": 0.0,
 }
 
 DOOR_OPEN_GAP = 56.0
@@ -72,10 +73,23 @@ class SectorLocator:
 
 
 class ShapedDoomEnv(DoomEnv):
-    def __init__(self, *args, reward: dict | None = None, **kwargs):
+    def __init__(self, *args, reward: dict | None = None, subgoal_grid: str | None = None, **kwargs):
         super().__init__(*args, **kwargs)
         self.reward_cfg = dict(REWARD, **(reward or {}))
         self._locator: SectorLocator | None = None
+        self._subgoals = None
+        if subgoal_grid and self.reward_cfg["subgoal"] > 0:
+            from doomai.envs.subgoals import Subgoals
+
+            self._subgoals = Subgoals(subgoal_grid)
+
+    def _opened_locks(self) -> set[int]:
+        return {int(lock) for lock in self._door[self._opened] if lock > 0}
+
+    def _potential(self, st, vitals) -> float:
+        if self._subgoals is None:
+            return 0.0
+        return self._subgoals.potential(st["x"], st["y"], vitals, self._opened_locks())
 
     def reset(self, *, seed=None, options=None):
         obs, info = super().reset(seed=seed, options=options)
@@ -96,6 +110,7 @@ class ShapedDoomEnv(DoomEnv):
         self._visit(st)
         self.episode_terms = {}
         self.episode_steps = 0
+        self._phi = self._potential(st, obs["vitals"])
         return obs, info
 
     def _visit(self, st) -> tuple[int, float]:
@@ -138,6 +153,10 @@ class ShapedDoomEnv(DoomEnv):
             new_sector, cell_reward = self._visit(st)
             terms["new_sector"] = cfg["new_sector"] * new_sector
             terms["new_cell"] = cell_reward
+            if self._subgoals is not None:
+                phi = self._potential(st, obs["vitals"])
+                terms["subgoal"] = cfg["subgoal"] * (phi - self._phi)
+                self._phi = phi
 
         left = max(0.0, 1.0 - st["tic"] / max(1, st["episode_ticks"]))
         if info["exit_reached"]:

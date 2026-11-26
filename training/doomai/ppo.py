@@ -99,8 +99,9 @@ LAYOUT = {
 
 
 class Workers:
-    def __init__(self, n: int, per: int, difficulty, weights, seed: int, map_dir: str):
+    def __init__(self, n: int, per: int, difficulty, weights, seed: int, map_dir: str, reward: dict | None = None, hard_share: float = 0.0):
         self.n, self.per = n, per
+        self.reward, self.hard_share = reward, hard_share
         self.difficulty, self.weights, self.seed, self.map_dir = difficulty, weights, seed, map_dir
         self.ctx = mp.get_context("forkserver")
         self.ctx.set_forkserver_preload(["doomai.worker"])
@@ -110,7 +111,7 @@ class Workers:
 
     def _start(self, i: int, seed: int) -> None:
         parent, child = self.ctx.Pipe()
-        p = self.ctx.Process(target=worker_main, args=(child, i, self.per, self.difficulty, self.weights, seed, self.map_dir), daemon=True)
+        p = self.ctx.Process(target=worker_main, args=(child, i, self.per, self.difficulty, self.weights, seed, self.map_dir, self.reward, self.hard_share), daemon=True)
         p.start()
         child.close()
         self.remotes[i], self.procs[i] = parent, p
@@ -239,6 +240,9 @@ def main(argv=None) -> None:
     p.add_argument("--eval-procs", type=int, default=3)
     p.add_argument("--eval-per-tier", type=int, default=10)
     p.add_argument("--shipped-score", type=float, default=0.0, help="validation score of the shipped agent, drawn as a reference line")
+    p.add_argument("--subgoal", type=float, default=0.0, help="subgoal shaping scale per grid cell of progress (training only; 0 = off)")
+    p.add_argument("--raise-at", type=float, default=0.6, help="raise a tier's difficulty when its rolling exit rate passes this")
+    p.add_argument("--hard-share", type=float, default=0.0, help="share of practice levels generated at full difficulty")
     args = p.parse_args(argv)
 
     torch.set_num_threads(1)
@@ -285,7 +289,8 @@ def main(argv=None) -> None:
     Path(map_dir).mkdir(parents=True, exist_ok=True)
     for stale in Path(map_dir).glob("*.wad"):
         stale.unlink(missing_ok=True)
-    workers = Workers(args.workers, args.envs_per_worker, difficulty, weights, args.seed * 1000, map_dir)
+    workers = Workers(args.workers, args.envs_per_worker, difficulty, weights, args.seed * 1000, map_dir,
+                      reward={"subgoal": args.subgoal}, hard_share=args.hard_share)
     B, T = args.workers * args.envs_per_worker, args.rollout
     obs_all = workers.reset()
     half = args.workers // 2 if args.workers > 1 else args.workers
@@ -458,7 +463,7 @@ def main(argv=None) -> None:
             hist = tier_hist[tier]
             if len(hist) >= 30:
                 rate = float(np.mean([s["exit"] for s in hist]))
-                if rate > 0.6 and difficulty[tier - 1] < 1.0:
+                if rate > args.raise_at and difficulty[tier - 1] < 1.0:
                     difficulty[tier - 1] = min(1.0, difficulty[tier - 1] + 0.1)
                     hist.clear()
                 elif rate < 0.15 and difficulty[tier - 1] > 0.0:
