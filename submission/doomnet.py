@@ -8,6 +8,8 @@ Inputs (all ego-centric, as the official wrapper provides them):
   rays      64 rays: distance + one-hot hit type, read by a circular 1-D conv (no seam behind the player)
   entities  up to 32 visible things: features + type embedding, pooled over the mask (any number of enemies)
   vitals    health, armour, ammo, keys, velocity, plus the agent's previous action
+  masks     USE is blocked for 8 steps after a press (door rules); ATTACK is blocked when no enemy is
+            in view, so ammo is not wasted on empty rooms (both are action masks from observation fields)
   slots     landmark memory (landmarks.py): where keys, locked doors, doors and pickups were seen,
             relative to the agent now; read by learned attention and added to the GRU input through a
             zero-initialised layer, so turning it on leaves an existing policy unchanged at first
@@ -23,6 +25,7 @@ from torch import nn
 from torch.nn import functional as F
 
 from doomobs import (  # noqa: F401
+    ATTACK_HEAD,
     HEAD_SIZES,
     HEADS,
     IMG_SHAPE,
@@ -114,13 +117,16 @@ class DoomNet(nn.Module):
         att = torch.softmax(score, dim=-1).unsqueeze(-1)
         return self.slot_out((att * self.slot_v(s)).sum(1))
 
-    def heads(self, h: torch.Tensor, use_allowed: torch.Tensor):
-        return mask_use(self.policy(h), use_allowed), self.value(h).squeeze(-1)
+    def heads(self, h: torch.Tensor, use_allowed: torch.Tensor, attack_ok: torch.Tensor | None = None):
+        logits = mask_use(self.policy(h), use_allowed)
+        if attack_ok is not None:
+            logits = mask_attack(logits, attack_ok)
+        return logits, self.value(h).squeeze(-1)
 
     def forward(self, x, prev_action, h, use_allowed):
         """One step: returns per-head logits (B, 13), value (B,), next hidden (B, H)."""
         h = self.gru(self.encode(x, prev_action), h)
-        logits, value = self.heads(h, use_allowed)
+        logits, value = self.heads(h, use_allowed, x.get("attack_ok"))
         return logits, value, h
 
     def forward_sequence(self, x, prev_action, h, use_allowed, dones):
@@ -134,8 +140,18 @@ class DoomNet(nn.Module):
             hs.append(h)
             h = h * (1.0 - dones[t]).unsqueeze(-1)
         hs = torch.stack(hs).reshape(L * N, -1)
-        logits, value = self.heads(hs, use_allowed.reshape(L * N))
+        attack_ok = flat.get("attack_ok")
+        logits, value = self.heads(hs, use_allowed.reshape(L * N), attack_ok)
         return logits, value
+
+
+def mask_attack(logits: torch.Tensor, attack_ok: torch.Tensor) -> torch.Tensor:
+    """Fire only when the observation shows an enemy in view (action masking from observation fields)."""
+    start = sum(HEAD_SIZES[:ATTACK_HEAD])
+    blocked = (attack_ok < 0.5).unsqueeze(-1)
+    att = logits[:, start : start + 2]
+    att = torch.where(blocked, torch.tensor([0.0, -1e9], device=logits.device).expand_as(att), att)
+    return torch.cat([logits[:, :start], att, logits[:, start + 2 :]], dim=1)
 
 
 def mask_use(logits: torch.Tensor, use_allowed: torch.Tensor) -> torch.Tensor:

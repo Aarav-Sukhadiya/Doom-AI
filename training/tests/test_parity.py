@@ -147,3 +147,16 @@ def test_turn_model_matches_engine_after_reset(pattern, tmp_path):
         assert abs(((a1 - a0 + 180) % 360 - 180) - predicted) < 1e-3
         a0 = a1
     env.close()
+
+
+def test_fire_mask_blocks_attack_only_when_enabled_and_no_enemy():
+    net = DoomNet().eval()
+    x = {k: torch.from_numpy(v) for k, v in stack([observe(S.observation_space().sample(), LandmarkTracker(), None) for _ in range(8)]).items()}
+    x["attack_ok"] = torch.zeros(8)
+    with torch.no_grad():
+        net.policy.bias[9:11] = torch.tensor([-5.0, 5.0])
+        masked, _, _ = net(x, torch.zeros(8, 9), net.initial_state(8), torch.ones(8))
+        x.pop("attack_ok")
+        free, _, _ = net(x, torch.zeros(8, 9), net.initial_state(8), torch.ones(8))
+    assert (sample(masked)[:, 3] == 0).all()
+    assert (sample(free, greedy=True)[:, 3] == 1).all()

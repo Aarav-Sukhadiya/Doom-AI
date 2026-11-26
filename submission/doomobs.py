@@ -27,6 +27,8 @@ HEADS = (("move", 3), ("strafe", 3), ("turn", 3), ("attack", 2), ("use", 2))
 HEAD_SIZES = [n for _, n in HEADS]
 USE_HEAD = 4
 USE_COOLDOWN = 8
+ATTACK_HEAD = 3
+ENEMY_TYPE_IDS = (1, 2, 3)
 
 
 def preprocess(obs: dict) -> dict[str, np.ndarray]:
@@ -51,6 +53,7 @@ def preprocess(obs: dict) -> dict[str, np.ndarray]:
         "ent_type": etype,
         "ent_mask": emask,
         "vitals": vitals.clip(-10.0, 10.0),
+        "attack_ok": np.float32(bool(np.isin(etype[emask > 0.5], ENEMY_TYPE_IDS).any())),
     }
 
 

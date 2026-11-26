@@ -243,6 +243,7 @@ def main(argv=None) -> None:
     p.add_argument("--subgoal", type=float, default=0.0, help="subgoal shaping scale per grid cell of progress (training only; 0 = off)")
     p.add_argument("--raise-at", type=float, default=0.6, help="raise a tier's difficulty when its rolling exit rate passes this")
     p.add_argument("--hard-share", type=float, default=0.0, help="share of practice levels generated at full difficulty")
+    p.add_argument("--fire-mask", action="store_true", help="block ATTACK when no enemy is in view (action mask from observation fields)")
     args = p.parse_args(argv)
 
     torch.set_num_threads(1)
@@ -260,7 +261,13 @@ def main(argv=None) -> None:
     writer.add_text("guide", GUIDE, 0)
 
     net = DoomNet(slots=args.slots).to(device)
-    (run_dir / "config.json").write_text(json.dumps({"slots": args.slots, "hidden": net.hidden}))
+    (run_dir / "config.json").write_text(json.dumps({"slots": args.slots, "hidden": net.hidden, "fire_mask": args.fire_mask}))
+
+    def batch(observations: list) -> dict:
+        arrays = stack(observations)
+        if not args.fire_mask:
+            arrays.pop("attack_ok", None)
+        return to_tensors(arrays, device)
     opt = torch.optim.Adam(net.parameters(), lr=args.lr, eps=1e-5)
     update, total_steps = 0, 0
     difficulty = mp.Array("d", [args.start_difficulty] * TIER_COUNT, lock=False)
@@ -332,7 +339,7 @@ def main(argv=None) -> None:
             g = groups[gi]
             if t % L == 0:
                 gh_chunks[gi][t // L] = g["h"]
-            x = to_tensors(stack(g["obs"]), device)
+            x = batch(g["obs"])
             prev_t = torch.from_numpy(g["prev"]).to(device)
             allowed = torch.from_numpy((g["cd"] == 0).astype(np.float32)).to(device)
             logits, value, g["h"] = net(x, prev_t, g["h"], allowed)
@@ -381,7 +388,7 @@ def main(argv=None) -> None:
             last_values = []
             for gi, g in enumerate(groups):
                 restarts_total += collect(gi)
-                x = to_tensors(stack(g["obs"]), device)
+                x = batch(g["obs"])
                 allowed = torch.from_numpy((g["cd"] == 0).astype(np.float32)).to(device)
                 _, lv, _ = net(x, torch.from_numpy(g["prev"]).to(device), g["h"], allowed)
                 last_values.append(lv)

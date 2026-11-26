@@ -23,6 +23,7 @@ class DoomAgent:
         config_path = WEIGHTS_DIR / "config.json"
         config = json.loads(config_path.read_text()) if config_path.exists() else {}
         self.greedy = bool(config.get("greedy", False))
+        self.fire_mask = bool(config.get("fire_mask", False))
         self.net = DoomNet(hidden=int(config.get("hidden", 256)), slots=bool(config.get("slots", False)))
         self.tracker = LandmarkTracker()
         weights = WEIGHTS_DIR / "model.pt"
@@ -44,7 +45,10 @@ class DoomAgent:
     @torch.inference_mode()
     def act(self, observation: dict) -> np.ndarray:
         try:
-            x = to_tensors({k: v[None] for k, v in observe(observation, self.tracker, None if self.first else self.prev_action).items()}, self.device)
+            arrays = observe(observation, self.tracker, None if self.first else self.prev_action)
+            if not self.fire_mask:
+                arrays.pop("attack_ok", None)
+            x = to_tensors({k: v[None] for k, v in arrays.items()}, self.device)
             prev = torch.from_numpy(self.prev_action[None]).to(self.device)
             allowed = torch.tensor([1.0 if self.use_cooldown == 0 else 0.0], device=self.device)
             logits, _, self.h = self.net(x, prev, self.h, allowed)
