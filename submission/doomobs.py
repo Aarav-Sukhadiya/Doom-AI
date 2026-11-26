@@ -23,9 +23,10 @@ VITAL_SCALE = np.array(
     [100, 100, 7, 50, 200, 50, 50, 300, 1, 1, 1, 1, 1, 1, 16, 16, 16], np.float32
 )
 
-HEADS = (("move", 3), ("strafe", 3), ("turn", 3), ("attack", 2), ("use", 2))
+HEADS = (("move", 3), ("strafe", 3), ("turn", 3), ("attack", 2), ("use", 2), ("weapon", 2))
 HEAD_SIZES = [n for _, n in HEADS]
 USE_HEAD = 4
+WEAPON_HEAD = 5
 USE_COOLDOWN = 8
 ATTACK_HEAD = 3
 ENEMY_TYPE_IDS = (1, 2, 3)
@@ -91,4 +92,6 @@ def decode_action(choice: np.ndarray) -> np.ndarray:
         out[rows[c == 2], hi] = 1
     out[:, 6] = choice[:, 3] == 1
     out[:, 7] = choice[:, 4] == 1
+    if choice.shape[1] > WEAPON_HEAD:
+        out[:, 8] = choice[:, WEAPON_HEAD] == 1
     return out

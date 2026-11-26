@@ -37,6 +37,8 @@ REWARD = {
     "pickup_weapon": 1.5,
     "futile_use": -0.1,
     "fight_still": 0.0,
+    "dodge": 0.02,
+    "cornered": -0.003,
     "idle_fire": -0.02,
     "living": -0.001,
     "subgoal": 0.0,
@@ -51,6 +53,12 @@ ENEMY_TYPES = np.array([i for i, t in enumerate(S.ENTITY_TYPES) if t.startswith(
 SELECTED_AMMO = S.VITALS_INDEX["selected_weapon_ammo"]
 HEALTH = S.VITALS_INDEX["health"]
 STILL_WINDOW = 8  # decisions (about 1 second)
+PROJECTILE = S.ENTITY_TYPES.index("projectile")
+THREAT_RANGE = 0.5  # entity distance in 1024-unit steps
+VEL_RIGHT = S.VITALS_INDEX["vel_right"]
+STRAFE_SPEED = 8.0  # map units per tic at full sideways speed
+CLOSE_RAY = 128.0 / 1024.0
+BOXED_SHARE = 0.75
 STILL_DISTANCE = 48.0  # map units
 KEY_COLOUR = ("blue", "yellow", "red", "blue", "yellow", "red")  # vitals key_* order: cards then skulls
 LOCK_COLOUR = {1: "red", 2: "blue", 3: "yellow", 4: "red", 5: "blue", 6: "yellow", 129: "red", 130: "blue", 131: "yellow"}
@@ -131,6 +139,9 @@ class ShapedDoomEnv(DoomEnv):
         self.pickups = 0
         self.futile_uses = 0
         self.still_fighting = 0
+        self.dodges = 0
+        self.boxed_fighting = 0
+        self._threat = self._incoming(obs)
         self._trail = [(st["x"], st["y"])]
         self._visit(st)
         self._enemy_in_view = self._sees_enemy(obs)
@@ -158,6 +169,24 @@ class ShapedDoomEnv(DoomEnv):
 
     def _weapons_owned(self) -> int:
         return sum(self._game.get_game_variable(getattr(vd.GameVariable, f"WEAPON{i}")) > 0 for i in range(2, 8))
+
+    @staticmethod
+    def _incoming(obs) -> bool:
+        """A projectile in view, within 512 units and heading toward the player."""
+        ents = obs["visible_entities"]
+        m = (np.asarray(ents["mask"]) > 0) & (np.asarray(ents["entity_type"]) == PROJECTILE)
+        if not m.any():
+            return False
+        f = np.asarray(ents["features"], np.float64)[m]
+        d, s, c, vf, vr = f[:, 0], f[:, 1], f[:, 2], f[:, 3], f[:, 4]
+        closing = (c * vf + s * -vr) < 0
+        return bool(np.any((d < THREAT_RANGE) & closing))
+
+    @staticmethod
+    def _boxed(obs) -> bool:
+        """Most of the 64 rays hit something within 128 units: a corridor or corner with little room."""
+        dist = np.nan_to_num(np.asarray(obs["rays"]["distance"], np.float64), nan=1.0)
+        return bool(np.mean(dist < CLOSE_RAY) >= BOXED_SHARE)
 
     @staticmethod
     def _sees_enemy(obs) -> bool:
@@ -216,6 +245,14 @@ class ShapedDoomEnv(DoomEnv):
         still = self._enemy_in_view and not st["finished"] and len(self._trail) > STILL_WINDOW and moved < STILL_DISTANCE
         terms["fight_still"] = cfg["fight_still"] * float(still)
         self.still_fighting += int(still)
+        sideways = min(1.0, abs(float(obs["vitals"][VEL_RIGHT])) / STRAFE_SPEED)
+        dodge = sideways if (self._threat and not st["finished"]) else 0.0
+        terms["dodge"] = cfg["dodge"] * dodge
+        self.dodges += int(dodge > 0.5)
+        boxed = self._enemy_in_view and not st["finished"] and self._boxed(obs)
+        terms["cornered"] = cfg["cornered"] * float(boxed)
+        self.boxed_fighting += int(boxed)
+        self._threat = self._incoming(obs)
         self._enemy_in_view = self._sees_enemy(obs)
         self._has_ammo = obs["vitals"][SELECTED_AMMO] > 0
 
@@ -267,5 +304,7 @@ class ShapedDoomEnv(DoomEnv):
                 "pickups": float(self.pickups),
                 "futile_uses": float(self.futile_uses),
                 "still_fighting": float(self.still_fighting),
+                "dodges": float(self.dodges),
+                "boxed_fighting": float(self.boxed_fighting),
             }
         return obs, float(sum(terms.values())), terminated, truncated, info

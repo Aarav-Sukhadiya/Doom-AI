@@ -236,3 +236,35 @@ def test_exit_stretch_pull_is_boosted(tmp_path):
         env.close()
         totals[boost] = total
     assert totals[1.0] > 0 and abs(totals[2.0] - 2 * totals[1.0]) < 1e-6
+
+
+def test_boxed_in_with_enemy_is_flagged_but_open_room_is_not(tmp_path):
+    results = {}
+    for name, grid in (("corridor", "##############\n#P..........z#\n##############"),
+                       ("room", "##############\n#............#\n#............#\n#.....P.....z#\n#............#\n#............#\n##############")):
+        env = ShapedDoomEnv(str(write_grid_wad(grid, tmp_path / f"{name}.wad")), "MAP01", episode_ticks=400)
+        env.reset(seed=0)
+        boxed = 0
+        for _ in range(6):
+            _, _, term, trunc, info = env.step(NOOP)
+            boxed += info["reward_terms"]["cornered"] < 0
+            if term or trunc:
+                break
+        env.close()
+        results[name] = boxed
+    assert results["corridor"] > 0 and results["room"] == 0
+
+
+def test_strafing_away_from_a_fireball_is_rewarded(tmp_path):
+    grid = "#################\n#...............#\n#...............#\n#.......P......i#\n#...............#\n#...............#\n#################"
+    env = ShapedDoomEnv(str(write_grid_wad(grid, tmp_path / "imp.wad")), "MAP01", episode_ticks=1400)
+    env.reset(seed=0)
+    left, right = np.array([0, 0, 1, 0, 0, 0, 0, 0, 0], np.int8), np.array([0, 0, 0, 1, 0, 0, 0, 0, 0], np.int8)
+    dodged = 0.0
+    for i in range(300):
+        _, _, term, trunc, info = env.step(left if (i // 6) % 2 == 0 else right)
+        dodged += info["reward_terms"]["dodge"]
+        if term or trunc or dodged > 0:
+            break
+    env.close()
+    assert dodged > 0

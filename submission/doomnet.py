@@ -39,6 +39,7 @@ from doomobs import (  # noqa: F401
     USE_COOLDOWN,
     USE_HEAD,
     VITAL_SCALE,
+    WEAPON_HEAD,
     decode_action,
     observe,
     preprocess,
@@ -51,8 +52,9 @@ def to_tensors(arrays: dict[str, np.ndarray], device) -> dict[str, torch.Tensor]
 
 
 class DoomNet(nn.Module):
-    def __init__(self, hidden: int = 256, slots: bool = False, crumbs: bool = False, mapping: bool = False):
+    def __init__(self, hidden: int = 256, slots: bool = False, crumbs: bool = False, mapping: bool = False, weapon: bool = False):
         super().__init__()
+        self.use_weapon = weapon
         self.hidden = hidden
         self.use_slots = slots
         self.use_crumbs = crumbs
@@ -99,7 +101,14 @@ class DoomNet(nn.Module):
             nn.init.zeros_(self.map_out.weight)
             nn.init.zeros_(self.map_out.bias)
         self.gru = nn.GRUCell(hidden, hidden)
-        self.policy = nn.Linear(hidden, sum(HEAD_SIZES))
+        self.policy = nn.Linear(hidden, sum(HEAD_SIZES[:WEAPON_HEAD]))
+        if weapon:
+            # "Next weapon" head: starts almost never pressing (about once every 150 decisions),
+            # so a run started from weapon-less weights behaves the same until it learns to switch.
+            self.weapon = nn.Linear(hidden, 2)
+            nn.init.zeros_(self.weapon.weight)
+            with torch.no_grad():
+                self.weapon.bias.copy_(torch.tensor([0.0, -5.0]))
         self.value = nn.Linear(hidden, 1)
         nn.init.orthogonal_(self.policy.weight, 0.01)
         nn.init.zeros_(self.policy.bias)
@@ -139,7 +148,11 @@ class DoomNet(nn.Module):
         return self.slot_out((att * self.slot_v(s)).sum(1))
 
     def heads(self, h: torch.Tensor, use_allowed: torch.Tensor, attack_ok: torch.Tensor | None = None):
-        logits = mask_use(self.policy(h), use_allowed)
+        if self.use_weapon:
+            weapon = self.weapon(h)
+        else:
+            weapon = _blocked_logits(h.device).expand(h.shape[0], 2)
+        logits = mask_use(torch.cat([self.policy(h), weapon], dim=1), use_allowed)
         if attack_ok is not None:
             logits = mask_attack(logits, attack_ok)
         return logits, self.value(h).squeeze(-1)
@@ -166,12 +179,24 @@ class DoomNet(nn.Module):
         return logits, value
 
 
+_BLOCKED_LOGITS: dict = {}
+
+
+def _blocked_logits(device) -> torch.Tensor:
+    """[0, -1e9] (choose "off") on this device, made once: a fresh tensor every call costs a
+    host-to-device copy and sync per forward pass and cannot be recorded in a CUDA graph."""
+    t = _BLOCKED_LOGITS.get(device)
+    if t is None:
+        t = _BLOCKED_LOGITS[device] = torch.tensor([0.0, -1e9], device=device)
+    return t
+
+
 def mask_attack(logits: torch.Tensor, attack_ok: torch.Tensor) -> torch.Tensor:
     """Fire only when the observation shows an enemy in view (action masking from observation fields)."""
     start = sum(HEAD_SIZES[:ATTACK_HEAD])
     blocked = (attack_ok < 0.5).unsqueeze(-1)
     att = logits[:, start : start + 2]
-    att = torch.where(blocked, torch.tensor([0.0, -1e9], device=logits.device).expand_as(att), att)
+    att = torch.where(blocked, _blocked_logits(logits.device).expand_as(att), att)
     return torch.cat([logits[:, :start], att, logits[:, start + 2 :]], dim=1)
 
 
@@ -179,8 +204,8 @@ def mask_use(logits: torch.Tensor, use_allowed: torch.Tensor) -> torch.Tensor:
     start = sum(HEAD_SIZES[:USE_HEAD])
     blocked = (use_allowed < 0.5).unsqueeze(-1)
     use = logits[:, start : start + 2]
-    use = torch.where(blocked, torch.tensor([0.0, -1e9], device=logits.device).expand_as(use), use)
-    return torch.cat([logits[:, :start], use], dim=1)
+    use = torch.where(blocked, _blocked_logits(logits.device).expand_as(use), use)
+    return torch.cat([logits[:, :start], use, logits[:, start + 2 :]], dim=1)
 
 
 def split_logits(logits: torch.Tensor) -> list[torch.Tensor]:

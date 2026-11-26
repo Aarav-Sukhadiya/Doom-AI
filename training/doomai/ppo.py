@@ -22,6 +22,7 @@ import subprocess
 import sys
 import time
 from collections import deque
+from multiprocessing.connection import wait
 from pathlib import Path
 
 os.environ.setdefault("OMP_NUM_THREADS", "1")
@@ -189,6 +190,61 @@ class RunningStd:
         return math.sqrt(self.var) + 1e-8
 
 
+class Decide:
+    """One rollout decision for a batch of games: forward pass, sampled choice, its log-prob, value.
+
+    At rollout batch sizes the eager forward is bound by kernel-launch overhead (about 4 ms for 28 games),
+    so on CUDA each batch size is recorded once as a CUDA graph and replayed (about 0.5 ms). Replay runs
+    the same kernels on the same weights (optimizer steps update them in place), so logits, values and
+    GRU states match eager mode bit for bit; only the sampling noise comes from a different random draw.
+    """
+
+    def __init__(self, net: torch.nn.Module, graphs: bool):
+        self.net, self.graphs, self.cache, self.pool = net, graphs, {}, None
+
+    def _run(self, x, prev, h, allowed):
+        logits, value, h_new = self.net(x, prev, h, allowed)
+        choice = sample(logits)
+        logp, _ = log_prob_entropy(logits, choice)
+        return choice, logp, value, h_new
+
+    def _capture(self, x, prev, h, allowed):
+        static = ({k: v.clone() for k, v in x.items()}, prev.clone(), h.clone(), allowed.clone())
+        side = torch.cuda.Stream()
+        side.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(side):  # warm-up (also lets cudnn pick its kernels for this shape)
+            for _ in range(3):
+                self._run(*static)
+        torch.cuda.current_stream().wait_stream(side)
+        if self.pool is None:
+            self.pool = torch.cuda.graph_pool_handle()
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph, pool=self.pool):
+            out = self._run(*static)
+        return static, out, graph
+
+    def __call__(self, x, prev, h, allowed):
+        """Returns (choice, logp, value, h_new); with graphs these are reused buffers, valid until the next call."""
+        if not self.graphs:
+            return self._run(x, prev, h, allowed)
+        n = prev.shape[0]
+        if n not in self.cache:
+            try:
+                self.cache[n] = self._capture(x, prev, h, allowed)
+            except Exception as err:  # never let an optimisation stop a run
+                print(f"CUDA graph capture failed ({type(err).__name__}: {err}); using eager mode", flush=True)
+                self.graphs = False
+                return self._run(x, prev, h, allowed)
+        (sx, sprev, sh, sallowed), out, graph = self.cache[n]
+        for k, v in x.items():
+            sx[k].copy_(v)
+        sprev.copy_(prev)
+        sh.copy_(h)
+        sallowed.copy_(allowed)
+        graph.replay()
+        return out
+
+
 def save_atomic(obj, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
@@ -238,6 +294,7 @@ def main(argv=None) -> None:
     p.add_argument("--slots", action="store_true", help="enable the landmark slot memory read path")
     p.add_argument("--crumbs", action="store_true", help="breadcrumb memory input: how often the agent has been around here")
     p.add_argument("--map", action="store_true", help="level map memory input: 32x32 map built from rays and odometry")
+    p.add_argument("--weapon", action="store_true", help="learned next-weapon action head")
     p.add_argument("--entity-range", type=float, default=4.0, help="landmark distance cap for entities, in 1024-unit steps (1.0 before main10)")
     p.add_argument("--target-entropy", type=float, default=0.0, help="adapt the entropy coefficient to hold this policy entropy (0 = fixed --ent)")
     p.add_argument("--eval-every", type=int, default=200, help="score a snapshot on validation levels every N updates in the background (0 = off)")
@@ -250,10 +307,14 @@ def main(argv=None) -> None:
     p.add_argument("--fire-mask", action="store_true", help="block ATTACK when no enemy is in view (action mask from observation fields)")
     p.add_argument("--freedoom-share", type=float, default=0.0, help="share of practice episodes on real Freedoom 2 levels MAP01-MAP20 (logged as tier5)")
     p.add_argument("--eval-freedoom", action="store_true", help="background validation also plays held-out Freedoom 2 MAP21-MAP32")
+    p.add_argument("--no-cuda-graphs", action="store_true", help="run rollout decisions in eager mode (same results, slower)")
     args = p.parse_args(argv)
+    if args.rollout % args.chunk:
+        p.error(f"--rollout ({args.rollout}) must be a multiple of --chunk ({args.chunk})")
 
     torch.set_num_threads(1)
     torch.manual_seed(args.seed)
+    shuffle_rng = np.random.default_rng(args.seed)  # minibatch order, so --seed makes CPU runs repeatable
     device = torch.device(args.device)
     torch.backends.cudnn.benchmark = True
     torch.set_float32_matmul_precision("high")
@@ -266,8 +327,8 @@ def main(argv=None) -> None:
     writer.add_custom_scalars(LAYOUT)
     writer.add_text("guide", GUIDE, 0)
 
-    net = DoomNet(slots=args.slots, crumbs=args.crumbs, mapping=args.map).to(device)
-    (run_dir / "config.json").write_text(json.dumps({"slots": args.slots, "hidden": net.hidden, "fire_mask": args.fire_mask, "entity_range": args.entity_range, "crumbs": args.crumbs, "map": args.map}))
+    net = DoomNet(slots=args.slots, crumbs=args.crumbs, mapping=args.map, weapon=args.weapon).to(device)
+    (run_dir / "config.json").write_text(json.dumps({"slots": args.slots, "hidden": net.hidden, "fire_mask": args.fire_mask, "entity_range": args.entity_range, "crumbs": args.crumbs, "map": args.map, "weapon": args.weapon}))
 
     def batch(observations: list) -> dict:
         arrays = stack(observations)
@@ -294,7 +355,7 @@ def main(argv=None) -> None:
     elif args.init:
         state = torch.load(args.init, map_location=device, weights_only=False)
         missing, unexpected = net.load_state_dict(state["model"] if "model" in state else state, strict=False)
-        if unexpected or any(not k.startswith(("slot_", "crumb_", "map_")) for k in missing):
+        if unexpected or any(not k.startswith(("slot_", "crumb_", "map_", "weapon.")) for k in missing):
             raise RuntimeError(f"--init mismatch: missing {missing}, unexpected {unexpected}")
         print(f"initialised from {args.init}; new parameters: {missing}", flush=True)
 
@@ -305,22 +366,22 @@ def main(argv=None) -> None:
     workers = Workers(args.workers, args.envs_per_worker, difficulty, weights, args.seed * 1000, map_dir,
                       reward={"subgoal": args.subgoal}, hard_share=args.hard_share, freedoom_share=args.freedoom_share,
                       entity_range=args.entity_range, mapping=args.map)
-    B, T = args.workers * args.envs_per_worker, args.rollout
+    W, P = args.workers, args.envs_per_worker
+    B, T, L = W * P, args.rollout, args.chunk
+    n_chunks = T // L
     obs_all = workers.reset()
-    half = args.workers // 2 if args.workers > 1 else args.workers
-    group_workers = [list(range(half)), list(range(half, args.workers))] if half < args.workers else [list(range(args.workers))]
-    groups = []
-    for ids in group_workers:
-        lo, hi = ids[0] * args.envs_per_worker, (ids[-1] + 1) * args.envs_per_worker
-        groups.append({
-            "ids": ids, "lo": lo, "hi": hi, "n": hi - lo,
-            "obs": obs_all[lo:hi],
-            "h": net.initial_state(hi - lo, device),
-            "prev": np.zeros((hi - lo, 9), np.float32),
-            "cd": np.zeros(hi - lo, np.int64),
-        })
+    # Per-env state carried across decisions and updates; env e lives on worker e // P.
+    cur_obs = [obs_all[w * P : (w + 1) * P] for w in range(W)]
+    h_state = net.initial_state(B, device)
+    prev = np.zeros((B, 9), np.float32)
+    cd = np.zeros(B, np.int64)
     ret_acc = np.zeros(B, np.float64)
     disc_ret = np.zeros(B, np.float64)
+    # Rollout storage (T, B, ...): GPU buffers made on the first decision and overwritten every update.
+    rb: dict = {"obs": {}, "h": torch.zeros(n_chunks, B, net.hidden, device=device)}
+    decide = Decide(net, graphs=device.type == "cuda" and not args.no_cuda_graphs)
+    rew_np = np.zeros((T, B), np.float32)
+    done_np = np.zeros((T, B), np.float32)
 
     tier_hist = {t: deque(maxlen=100) for t in range(1, TIER_COUNT + 2)}
     recent = deque(maxlen=200)
@@ -335,35 +396,42 @@ def main(argv=None) -> None:
             print("STOP file found: saving and shutting down", flush=True)
             break
         t0 = time.time()
-        keys = ("obs", "prev", "allowed", "choice", "logp", "value", "reward", "done")
-        gbuf = [{k: [] for k in keys} for _ in groups]
-        L = args.chunk
-        n_chunks = T // L
-        gh_chunks = [torch.zeros(n_chunks, g["n"], net.hidden, device=device) for g in groups]
         net.eval()
+        step_of = [0] * W  # decisions worker w has taken this rollout
+        sent: list = [None] * W  # the actions worker w is executing
 
-        def act(gi: int, t: int) -> None:
-            g = groups[gi]
-            if t % L == 0:
-                gh_chunks[gi][t // L] = g["h"]
-            x = batch(g["obs"])
-            prev_t = torch.from_numpy(g["prev"]).to(device)
-            allowed = torch.from_numpy((g["cd"] == 0).astype(np.float32)).to(device)
-            logits, value, g["h"] = net(x, prev_t, g["h"], allowed)
-            choice = sample(logits)
-            logp, _ = log_prob_entropy(logits, choice)
+        def store(name: str, t_t, e_t, v: torch.Tensor, into: dict | None = None) -> None:
+            into = rb if into is None else into
+            if name not in into:
+                into[name] = torch.empty((T, B, *v.shape[1:]), dtype=v.dtype, device=device)
+            into[name][t_t, e_t] = v
+
+        def act(ws: list[int]) -> None:
+            """One decision for every env of the workers in ws (each may be at a different step t)."""
+            envs = np.concatenate([np.arange(w * P, (w + 1) * P) for w in ws])
+            ts = np.repeat([step_of[w] for w in ws], P)
+            e_t, t_t = torch.from_numpy(envs).to(device), torch.from_numpy(ts).to(device)
+            starts = ts % L == 0
+            if starts.any():  # first decision of a training chunk: keep the GRU state it starts from
+                s_env = torch.from_numpy(envs[starts]).to(device)
+                rb["h"][torch.from_numpy(ts[starts] // L).to(device), s_env] = h_state[s_env]
+            x = batch([o for w in ws for o in cur_obs[w]])
+            prev_t = torch.from_numpy(prev[envs]).to(device)
+            allowed = torch.from_numpy((cd[envs] == 0).astype(np.float32)).to(device)
+            choice, logp, value, h_new = decide(x, prev_t, h_state[e_t], allowed)
+            h_state[e_t] = h_new
             actions = decode_action(choice.cpu().numpy())
-            workers.send_step(g["ids"], actions)
-            g["actions"] = actions
-            gb = gbuf[gi]
-            for k, v in (("obs", x), ("prev", prev_t), ("allowed", allowed), ("choice", choice), ("logp", logp), ("value", value)):
-                gb[k].append(v)
+            workers.send_step(ws, actions)
+            for k, w in enumerate(ws):
+                sent[w] = actions[k * P : (k + 1) * P]
+            for key, v in x.items():
+                store(key, t_t, e_t, v, rb["obs"])
+            for name, v in (("prev", prev_t), ("allowed", allowed), ("choice", choice), ("logp", logp), ("value", value)):
+                store(name, t_t, e_t, v)
 
-        def collect(gi: int) -> int:
-            nonlocal ret_acc, disc_ret
-            g = groups[gi]
-            results, restarts = workers.recv_step(g["ids"])
-            lo, hi = g["lo"], g["hi"]
+        def collect(w: int) -> int:
+            results, restarts = workers.recv_step([w])
+            lo, hi, t = w * P, (w + 1) * P, step_of[w]
             rewards = np.array([r[1] for r in results], np.float32)
             dones = np.array([r[2] for r in results], np.float32)
             for i, r in enumerate(results):
@@ -376,43 +444,47 @@ def main(argv=None) -> None:
             disc_ret[lo:hi] = disc_ret[lo:hi] * args.gamma + rewards
             ret_norm.update(disc_ret[lo:hi])
             disc_ret[lo:hi] *= 1.0 - dones
-            gbuf[gi]["reward"].append(torch.from_numpy(rewards).to(device))
-            gbuf[gi]["done"].append(torch.from_numpy(dones).to(device))
-            actions = g["actions"]
-            g["cd"] = np.where(actions[:, 7] == 1, USE_COOLDOWN, np.maximum(g["cd"] - 1, 0))
-            g["cd"] = np.where(dones > 0, 0, g["cd"])
-            g["prev"] = actions.astype(np.float32) * (1.0 - dones)[:, None]
-            g["h"] = g["h"] * torch.from_numpy(1.0 - dones).to(device).unsqueeze(-1)
-            g["obs"] = [r[0] for r in results]
+            rew_np[t, lo:hi] = rewards
+            done_np[t, lo:hi] = dones
+            actions = sent[w]
+            cd[lo:hi] = np.where(dones > 0, 0, np.where(actions[:, 7] == 1, USE_COOLDOWN, np.maximum(cd[lo:hi] - 1, 0)))
+            prev[lo:hi] = actions.astype(np.float32) * (1.0 - dones)[:, None]
+            if dones.any():
+                h_state[lo:hi] *= torch.from_numpy(1.0 - dones).to(device).unsqueeze(-1)
+            cur_obs[w] = [r[0] for r in results]
+            step_of[w] = t + 1
             return restarts
 
+        # Asynchronous rollout: whenever any workers have replied, batch all of them into one forward pass
+        # and send their next actions at once, so no worker waits for a slower one between decisions.
+        # Every env still takes exactly T decisions with the same frozen policy, as in a lockstep rollout.
         with torch.no_grad():
-            for t in range(T):
-                for gi in range(len(groups)):
-                    if t > 0:
-                        restarts_total += collect(gi)
-                    act(gi, t)
-            last_values = []
-            for gi, g in enumerate(groups):
-                restarts_total += collect(gi)
-                x = batch(g["obs"])
-                allowed = torch.from_numpy((g["cd"] == 0).astype(np.float32)).to(device)
-                _, lv, _ = net(x, torch.from_numpy(g["prev"]).to(device), g["h"], allowed)
-                last_values.append(lv)
-            last_value = torch.cat(last_values)
+            ready, flying = list(range(W)), {}
+            while ready or flying:
+                if ready:
+                    act(ready)
+                    for w in ready:
+                        flying[workers.remotes[w]] = w
+                    ready = []
+                for conn in wait(list(flying)):
+                    w = flying.pop(conn)
+                    restarts_total += collect(w)
+                    if step_of[w] < T:
+                        ready.append(w)
+            x = batch([o for w in range(W) for o in cur_obs[w]])
+            allowed = torch.from_numpy((cd == 0).astype(np.float32)).to(device)
+            _, last_value, _ = net(x, torch.from_numpy(prev).to(device), h_state, allowed)
 
-        buf = {k: [torch.cat([gb[k][t] for gb in gbuf], dim=0) if k != "obs" else {kk: torch.cat([gb[k][t][kk] for gb in gbuf], dim=0) for kk in gbuf[0][k][t]} for t in range(T)] for k in keys}
-        h_chunks = torch.cat(gh_chunks, dim=1)
-
-        rewards = torch.stack(buf["reward"]) / ret_norm.std
-        values = torch.stack(buf["value"])
-        dones = torch.stack(buf["done"])
+        h_chunks = rb["h"]
+        rewards = torch.from_numpy(rew_np).to(device) / ret_norm.std
+        values = rb["value"]
+        dones = torch.from_numpy(done_np).to(device)
         adv, returns = gae(rewards, values, dones, last_value, args.gamma, args.lam)
         rollout_time = time.time() - t0
 
-        obs_b = {k: torch.stack([o[k] for o in buf["obs"]]) for k in buf["obs"][0]}
-        prev_b, allowed_b = torch.stack(buf["prev"]), torch.stack(buf["allowed"])
-        choice_b, logp_b = torch.stack(buf["choice"]), torch.stack(buf["logp"])
+        obs_b = rb["obs"]
+        prev_b, allowed_b = rb["prev"], rb["allowed"]
+        choice_b, logp_b = rb["choice"], rb["logp"]
         net.train()
         seqs = [(c, b) for c in range(n_chunks) for b in range(B)]
         mb_size = max(1, len(seqs) // args.minibatches)
@@ -420,7 +492,7 @@ def main(argv=None) -> None:
         bad_update = False
         before = {"model": copy.deepcopy(net.state_dict()), "optimizer": copy.deepcopy(opt.state_dict())}
         for _ in range(args.epochs):
-            order = np.random.permutation(len(seqs))
+            order = shuffle_rng.permutation(len(seqs))
             for m in range(0, len(seqs), mb_size):
                 idx = order[m : m + mb_size]
                 cs = torch.tensor([seqs[i][0] for i in idx], device=device)
@@ -575,6 +647,7 @@ def main(argv=None) -> None:
         "steps": total_steps,
         "difficulty": list(difficulty[:]),
         "ret_norm": (ret_norm.mean, ret_norm.var, ret_norm.count),
+        "ent_coef": ent_coef,
         "args": vars(args),
     }
     save_atomic(ck, run_dir / "latest.pt")

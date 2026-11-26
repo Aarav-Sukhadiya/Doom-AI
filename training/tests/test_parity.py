@@ -52,17 +52,17 @@ def agent_actions(agent, env, seed, steps):
     return out
 
 
-@pytest.mark.parametrize("tier,slots,crumbs,mapping", [(2, False, False, False), (3, True, False, False), (4, True, True, False), (4, True, True, True)])
-def test_trainer_and_submitted_agent_choose_identical_actions(tier, slots, crumbs, mapping, tmp_path, monkeypatch):
+@pytest.mark.parametrize("tier,slots,crumbs,mapping,weapon", [(2, False, False, False, False), (3, True, False, False, False), (4, True, True, False, False), (4, True, True, True, False), (1, True, True, True, True)])
+def test_trainer_and_submitted_agent_choose_identical_actions(tier, slots, crumbs, mapping, weapon, tmp_path, monkeypatch):
     torch.manual_seed(7)
-    net = DoomNet(slots=slots, crumbs=crumbs, mapping=mapping).eval()
+    net = DoomNet(slots=slots, crumbs=crumbs, mapping=mapping, weapon=weapon).eval()
     with torch.no_grad():
         for p in net.parameters():
             p.add_(torch.randn_like(p) * 0.05)
     weights = tmp_path / "w"
     weights.mkdir()
     torch.save(net.state_dict(), weights / "model.pt")
-    (weights / "config.json").write_text(json.dumps({"greedy": True, "slots": slots, "crumbs": crumbs, "map": mapping, "fire_mask": True}))
+    (weights / "config.json").write_text(json.dumps({"greedy": True, "slots": slots, "crumbs": crumbs, "map": mapping, "weapon": weapon, "fire_mask": True}))
 
     import importlib.util
 
@@ -248,3 +248,22 @@ def test_level_map_shows_corridor_and_path(tmp_path):
     assert view[3, mid:, mid - 1 : mid + 1].max() == 255
     assert view[3, : mid - 3].max() == 0
     assert per_step < 0.01
+
+
+def test_weapon_head_handover():
+    torch.manual_seed(8)
+    base = DoomNet(slots=True, crumbs=True, mapping=True).eval()
+    with_weapon = DoomNet(slots=True, crumbs=True, mapping=True, weapon=True).eval()
+    missing, unexpected = with_weapon.load_state_dict(base.state_dict(), strict=False)
+    assert not unexpected and all(k.startswith("weapon.") for k in missing)
+    x = {k: torch.from_numpy(v) for k, v in stack([observe(S.observation_space().sample(), LandmarkTracker(mapping=True), None) for _ in range(8)]).items()}
+    prev, h, allowed = torch.zeros(8, 9), torch.randn(8, base.hidden), torch.ones(8)
+    with torch.no_grad():
+        a = base(x, prev, h, allowed)
+        b = with_weapon(x, prev, h, allowed)
+    assert torch.equal(a[0][:, :13], b[0][:, :13]) and torch.equal(a[1], b[1])
+    press = torch.softmax(b[0][:, 13:], -1)[:, 1]
+    assert torch.all(press < 0.01)
+    choice = doomnet.sample(a[0])
+    assert torch.all(choice[:, 5] == 0)
+    assert not decode_action(choice.numpy())[:, 8].any()
