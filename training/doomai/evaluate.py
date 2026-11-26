@@ -46,20 +46,21 @@ def _load_agent(weights: str, greedy: bool):
     spec.loader.exec_module(module)
     import torch
 
-    tmp = Path(tempfile.mkdtemp(prefix="doomai_eval_w_"))
-    config = {"greedy": greedy}
-    if weights:
-        state = torch.load(weights, map_location="cpu", weights_only=False)
-        state = state["model"] if isinstance(state, dict) and "model" in state else state
-        torch.save(state, tmp / "model.pt")
-        run_config = Path(weights).resolve().parent / "config.json"
-        if run_config.exists():
-            config = dict(json.loads(run_config.read_text()), greedy=greedy)
-    (tmp / "config.json").write_text(json.dumps(config))
-    module.WEIGHTS_DIR = tmp
     from doom_env import spaces as S
 
-    return module.DoomAgent(S.observation_space(), S.action_space(), "cpu")
+    config = {"greedy": greedy}
+    with tempfile.TemporaryDirectory(prefix="doomai_eval_w_") as tmp_dir:
+        tmp = Path(tmp_dir)
+        if weights:
+            state = torch.load(weights, map_location="cpu", weights_only=False)
+            state = state["model"] if isinstance(state, dict) and "model" in state else state
+            torch.save(state, tmp / "model.pt")
+            run_config = Path(weights).resolve().parent / "config.json"
+            if run_config.exists():
+                config = dict(json.loads(run_config.read_text()), greedy=greedy)
+        (tmp / "config.json").write_text(json.dumps(config))
+        module.WEIGHTS_DIR = tmp
+        return module.DoomAgent(S.observation_space(), S.action_space(), "cpu")
 
 
 def _run(job):

@@ -139,14 +139,27 @@ class Workers:
                     raise RuntimeError(out[1])
             except (EOFError, RuntimeError, ConnectionError) as err:
                 print(f"worker {i} died ({str(err).splitlines()[-1] if str(err) else 'EOF'}); restarting", flush=True)
-                self.procs[i].kill()
-                self._start(i, self.seed + 1000 + i + int(time.time()) % 1000)
+                obs = self._restart(i)
                 restarts += 1
-                self.remotes[i].send(("reset", None))
-                obs = self.remotes[i].recv()
                 out = [(o, 0.0, True, None) for o in obs]
             results.extend(out)
         return results, restarts
+
+    def _restart(self, i: int, attempts: int = 10) -> list:
+        """Restart worker i until its reset returns one observation per env (a failed reset sends an error tuple)."""
+        for attempt in range(attempts):
+            self.procs[i].kill()
+            self._start(i, self.seed + 1000 * (attempt + 1) + i + int(time.time()) % 1000)
+            try:
+                self.remotes[i].send(("reset", None))
+                obs = self.remotes[i].recv()
+            except (EOFError, ConnectionError, BrokenPipeError):
+                obs = None
+            if isinstance(obs, list) and len(obs) == self.per:
+                return obs
+            print(f"worker {i} restart attempt {attempt + 1} failed; retrying in 5 s", flush=True)
+            time.sleep(5)
+        raise RuntimeError(f"worker {i} could not be restarted after {attempts} attempts")
 
     def close(self) -> None:
         for r in self.remotes:
@@ -268,7 +281,10 @@ def main(argv=None) -> None:
             raise RuntimeError(f"--init mismatch: missing {missing}, unexpected {unexpected}")
         print(f"initialised from {args.init}; new parameters: {missing}", flush=True)
 
-    map_dir = tempfile.mkdtemp(prefix=f"doomai_{args.run}_")
+    map_dir = str(run_dir / "levels")
+    Path(map_dir).mkdir(parents=True, exist_ok=True)
+    for stale in Path(map_dir).glob("*.wad"):
+        stale.unlink(missing_ok=True)
     workers = Workers(args.workers, args.envs_per_worker, difficulty, weights, args.seed * 1000, map_dir)
     B, T = args.workers * args.envs_per_worker, args.rollout
     obs_all = workers.reset()
