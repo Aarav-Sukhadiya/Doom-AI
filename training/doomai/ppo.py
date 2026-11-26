@@ -6,6 +6,8 @@ Levels come from the procedural generator; each tier's difficulty rises on its o
 exit rate on that tier improves.
 
     python -m doomai.ppo --run v1 --tiers 1 2 3 --hours 2
+
+Stop a run cleanly (checkpoint saved, every game closed) with: touch runs/<run>/STOP
 """
 
 from __future__ import annotations
@@ -291,6 +293,9 @@ def main(argv=None) -> None:
     deadline = start + args.hours * 3600
 
     while time.time() < deadline and (not args.max_updates or update < args.max_updates):
+        if (run_dir / "STOP").exists():
+            print("STOP file found: saving and shutting down", flush=True)
+            break
         t0 = time.time()
         buf = {k: [] for k in ("obs", "prev", "allowed", "choice", "logp", "value", "reward", "done")}
         L = args.chunk
