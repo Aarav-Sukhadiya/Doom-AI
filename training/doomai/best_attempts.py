@@ -15,6 +15,9 @@ becomes the new best, saved in runs/best_attempts/<map>/:
 
 The previous best moves to <map>/history/ (demo, review and record only, no video). Every attempt
 on every map is also appended to runs/best_attempts/log.jsonl.
+
+Whatever the score, each snapshot's best attempt on a map is also kept as <map>/latest.mp4 (with
+latest.trace.txt), and runs/best_attempts/SCOREBOARD.txt is rewritten after every snapshot.
 """
 
 from __future__ import annotations
@@ -127,6 +130,10 @@ def process(weights: Path, attempts: int, margin: float, procs: int) -> None:
         for name in maps:
             mine = [r for r in results if r["map"] == name]
             best = max(mine, key=lambda r: r["score"])
+            folder = OUT / name
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / "latest.trace.txt").write_text(f"snapshot {snapshot}\n" + best["review"] + "\n")
+            render(*maps[name][:2], maps[name][2], Path(best["lmp"]), folder / "latest.mp4")
             prev_file = OUT / name / "best.json"
             prev = json.loads(prev_file.read_text())["score"] if prev_file.exists() else None
             scores = ", ".join(f"{r['score']:.1f}" for r in mine)
@@ -136,6 +143,24 @@ def process(weights: Path, attempts: int, margin: float, procs: int) -> None:
             best.update(snapshot=snapshot, stored_at=datetime.now().isoformat(timespec="seconds"), previous_best=prev)
             store(best, weights, *maps[name])
             log(f"{snapshot} {name}: attempts {scores}; NEW BEST {best['score']:.1f} (was {prev}) stored")
+    scoreboard(snapshot)
+
+
+def scoreboard(last: str) -> None:
+    rows = [f"Best attempts on the hardest maps (updated {datetime.now():%d %b %H:%M}, last snapshot played: {last})", ""]
+    rows.append(f"{'map':16s} {'best':>6s}  {'result':12s} {'from snapshot':22s} {'stored':16s} records")
+    for name, *_ in HARD_MAPS:
+        f = OUT / name / "best.json"
+        if not f.exists():
+            continue
+        b = json.loads(f.read_text())
+        s = b["stats"]
+        result = "EXIT" if s["exit"] else "died" if s["dead"] else "out of time"
+        records = 1 + len(list((OUT / name / "history").glob("*"))) if (OUT / name / "history").exists() else 1
+        rows.append(f"{name:16s} {b['score']:6.1f}  {result:12s} {b['snapshot']:22s} {b['stored_at'][5:16]:16s} {records}")
+    played = sum(1 for _ in open(OUT / "log.jsonl")) if (OUT / "log.jsonl").exists() else 0
+    rows += ["", f"attempts played so far: {played}", "best.mp4 = record run, latest.mp4 = best attempt of the most recent snapshot"]
+    (OUT / "SCOREBOARD.txt").write_text("\n".join(rows) + "\n")
 
 
 def main() -> None:
