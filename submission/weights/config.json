@@ -2,5 +2,5 @@
   "slots": true,
   "hidden": 256,
   "greedy": false,
-  "source": "runs/main5/model_u400.pt"
+  "source": "runs/main5/model_u1200.pt"
 }
