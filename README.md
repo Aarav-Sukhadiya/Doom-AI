@@ -80,7 +80,7 @@ everything else, and very large real maps.
 | Required | Where |
 | --- | --- |
 | Public GitHub repository with the source code, trained weights and the track entry point | This repository. The agent the organisers run is `submission/agent.py`, with its trained network in `submission/weights/` |
-| 2-page project brief (PDF): USP, system architecture, technical approach | Added to this repository before the deadline |
+| 2-page project brief (PDF): USP, system architecture, technical approach | [brief/brief.pdf](brief/brief.pdf) (made from `brief/brief.html`) |
 
 ## 7. Playing by the rules
 

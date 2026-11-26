@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Doom-AI Project Brief</title>
+<style>
+@page { size: A4; margin: 13mm 14mm 12mm; }
+:root { --ink: #1d2126; --muted: #5b6470; --rule: #d5dae0; --accent: #a3361f; --panel: #f4f5f7; }
+* { box-sizing: border-box; }
+body { margin: 0; color: var(--ink); font: 9.6pt/1.38 "Inter", "Helvetica Neue", Arial, sans-serif; }
+h1 { font-size: 19pt; margin: 0 0 1mm; letter-spacing: -0.01em; }
+.sub { color: var(--muted); margin: 0 0 3.5mm; font-size: 9.4pt; }
+h2 { font-size: 11.2pt; margin: 4mm 0 1.5mm; color: var(--accent); }
+h3 { font-size: 9.8pt; margin: 2.5mm 0 1mm; }
+p { margin: 0 0 1.8mm; }
+ul { margin: 0 0 1.8mm; padding-left: 4.5mm; }
+li { margin: 0 0 0.8mm; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 5mm; }
+.usp { background: var(--panel); border-left: 2.5px solid var(--accent); padding: 2.5mm 3.5mm; margin: 1mm 0 2mm; }
+table { border-collapse: collapse; width: 100%; font-size: 8.8pt; margin: 1mm 0 2mm; }
+th, td { text-align: left; padding: 1.1mm 2mm 1.1mm 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { color: var(--muted); font-weight: 600; }
+td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; }
+.diagram { width: 100%; margin: 1mm 0 2mm; }
+.diagram text { font: 7.6pt "Inter", Arial, sans-serif; fill: var(--ink); }
+.diagram .t { font-weight: 600; }
+.diagram .m { fill: var(--muted); font-size: 7pt; }
+.small { font-size: 8.4pt; color: var(--muted); }
+.page2 { break-before: page; }
+code { font: 8.4pt "JetBrains Mono", "DejaVu Sans Mono", monospace; }
+</style>
+</head>
+<body>
+
+<h1>Doom-AI: an agent that plays DOOM levels it has never seen</h1>
+<p class="sub">Yugaantar 2026, DevForge, Track 1 "Can It Play DOOM?" &nbsp;|&nbsp; github.com/Aarav-Sukhadiya/Doom-AI &nbsp;|&nbsp; entry point <code>submission/agent.py</code></p>
+
+<h2>1. The problem and our idea</h2>
+<p>The organisers test agents on unseen maps in four tiers: combat and survival, multi-room exploration with
+doors, long keycard routes, and a full gauntlet with several locks. An agent that memorises button sequences or
+a single map fails on new layouts. It has to learn general skills: fight, explore, find keys, remember where the
+matching door was, and get back to it.</p>
+<div class="usp"><b>Our USP: the agent remembers places, not button sequences.</b> It builds three memories while it
+plays, all from what any player can observe: <b>landmarks</b> (where it last saw a key, a locked door, a door,
+health, ammo, armour or a weapon), <b>breadcrumbs</b> (how often it has walked each patch of ground) and a
+<b>map it draws itself</b> from its 64 distance sensors. The game never gives it coordinates; it tracks its own
+position by dead reckoning from its turns and velocity, like counting steps in the dark. A trained neural network
+reads these memories and makes every decision.</div>
+
+<h2>2. System architecture</h2>
+<svg class="diagram" viewBox="0 0 640 178" role="img" aria-label="Observations feed memories and encoders, which feed a recurrent policy with six action heads">
+  <g fill="#f4f5f7" stroke="#c9ced5">
+    <rect x="2" y="6" width="150" height="166" rx="5"/>
+    <rect x="172" y="6" width="190" height="166" rx="5"/>
+    <rect x="382" y="44" width="112" height="90" rx="5"/>
+    <rect x="514" y="6" width="124" height="166" rx="5"/>
+  </g>
+  <text x="10" y="20" class="t">Observations (official)</text>
+  <text x="10" y="36">Screen, 4 frames 60x80</text>
+  <text x="10" y="52">64 rays: distance + hit type</text>
+  <text x="10" y="68">32 visible objects: type,</text>
+  <text x="10" y="80">distance, direction, speed</text>
+  <text x="10" y="96">Vitals: health, ammo, keys,</text>
+  <text x="10" y="108">weapon, velocity</text>
+  <text x="10" y="124">Previous action</text>
+  <text x="10" y="148" class="m">Nothing privileged is used</text>
+  <text x="10" y="160" class="m">when the agent plays.</text>
+  <text x="180" y="20" class="t">Encoders and memories</text>
+  <text x="180" y="36">CNN on the screen</text>
+  <text x="180" y="50">Circular conv over the rays</text>
+  <text x="180" y="64">Object embedding + pooling</text>
+  <text x="180" y="80">Dead reckoning (turn model +</text>
+  <text x="180" y="92">velocity) gives position</text>
+  <text x="180" y="108">Landmarks: 8 slots, attention</text>
+  <text x="180" y="122">Breadcrumbs: visits in 8 dirs</text>
+  <text x="180" y="136">Self-drawn 32x32 map + CNN</text>
+  <text x="180" y="150">Room around me: 8 directions</text>
+  <text x="180" y="164" class="m">New inputs start switched off</text>
+  <text x="390" y="62" class="t">Recurrent core</text>
+  <text x="390" y="80">256-unit trunk</text>
+  <text x="390" y="96">GRU, 256 units</text>
+  <text x="390" y="112">Value head (training)</text>
+  <text x="522" y="20" class="t">Six action heads</text>
+  <text x="522" y="38">Move fwd / back</text>
+  <text x="522" y="54">Strafe left / right</text>
+  <text x="522" y="70">Turn left / right</text>
+  <text x="522" y="86">Fire*</text>
+  <text x="522" y="102">USE*</text>
+  <text x="522" y="118">Next weapon</text>
+  <text x="522" y="140" class="m">*masked from observation:</text>
+  <text x="522" y="152" class="m">fire only with an enemy in</text>
+  <text x="522" y="164" class="m">view; USE has a cooldown</text>
+  <g stroke="#a3361f" stroke-width="1.4" fill="none" marker-end="url(#a)">
+    <path d="M152 89 H170"/><path d="M362 89 H380"/><path d="M494 89 H512"/>
+  </g>
+  <defs><marker id="a" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 z" fill="#a3361f"/></marker></defs>
+</svg>
+<p>Each decision covers 4 game tics. The whole network decides in about 6 ms on one CPU thread (the limit is
+40 ms), uses 1.6 GB of RAM and 290 MB of GPU memory (limits 8 GB and 2 GB), and loads only from
+<code>submission/</code>. Each new memory was added as a residual branch whose output starts at zero, so a
+trained agent could be extended without forgetting what it already knew.</p>
+
+<h2>3. Technical approach</h2>
+<div class="grid2">
+<div>
+<h3>Learning</h3>
+<p>Recurrent PPO with GAE, trained from scratch on one laptop (RTX 5070 Laptop GPU, 16 threads): 56 games in
+parallel in lightweight worker processes, about 2,000 decisions per second, about 95 million decisions in total.
+Gradients flow through the GRU over 32-step chunks.</p>
+<h3>Practice levels</h3>
+<p>Our level generator writes real DOOM maps from text layouts in the four tiers and proves each one solvable
+before use. Seeds are split 80/10/10 into practice, validation and locked test levels. The agent also practises
+on 56 real Freedoom maps; 12 more are kept back only for testing. Difficulty rises per tier as the agent
+improves, and a controller shifts practice between tiers from test results.</p>
+</div>
+<div>
+<h3>Rewards (training only)</h3>
+<p>The exit is worth the most (25, plus health and time bonuses). Smaller rewards go to keys, doors, locked doors,
+new areas and ground, kills, pickups and dodging incoming fireballs. Damage, dying early, wasted ammo and pressing
+USE on a door it has no key for all cost points. A training-only hint rewards progress toward the next key, its
+door, then the exit. None of this reaches the submitted agent.</p>
+<h3>Testing and safe shipping</h3>
+<p>Every 200 updates a snapshot plays 80 validation levels and our copy of the official test: 25 locked levels
+per tier with the official time and compute limits, scored in the four official categories. It ships only if both
+tests agree it is better and <code>validate.py</code> passes.</p>
+</div>
+</div>
+
+<h2 class="page2">4. Results</h2>
+<p>The submitted agent was trained overnight. Results are on levels it never trained on; the organisers' maps
+may differ from ours, so these are estimates.</p>
+<table>
+<thead><tr><th>Test</th><th class="n">Exit reached</th><th class="n">Died</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td>Organisers' test map (two_rooms)</td><td class="n">every run</td><td class="n">0%</td><td>Passes <code>validate.py</code>; 1.2 s of its 21 s compute budget</td></tr>
+<tr><td>Tier 1, combat and survival</td><td class="n">36 to 48%</td><td class="n">24 to 30%</td><td>Fires only at visible enemies, dodges fireballs</td></tr>
+<tr><td>Tier 2, multi-room with doors</td><td class="n">60 to 72%</td><td class="n">0%</td><td>Opens doors and works room to room</td></tr>
+<tr><td>Tier 3, keycards</td><td class="n">70 to 84%</td><td class="n">0%</td><td>Fetches the key, returns to its door</td></tr>
+<tr><td>Tier 4, full gauntlet</td><td class="n">16 to 25%</td><td class="n">45 to 56%</td><td>Has finished each of our 3 hardest levels</td></tr>
+<tr><td>Held-out Freedoom maps</td><td class="n">0%</td><td class="n">75 to 83%</td><td>Explores and fights; far larger than practice maps</td></tr>
+</tbody>
+</table>
+<p class="small">Ranges cover the submitted agent and the best snapshots of the final run, on 20 to 25 locked
+levels per tier. Over the night, our official-style test score rose from 40 (the agent we had the evening before) to 55 to
+56, and the validation score from 7.0 to 11.4.</p>
+
+<h2>5. What we learned</h2>
+<ul>
+<li><b>Measure before changing.</b> Watching recorded runs found most of our fixes: the agent could not change
+weapons (no action produced the button), sprayed ammo at nothing, pressed USE 27 times on a yellow door
+without the key, and walked away from an exit 2 tiles away because nothing it senses shows the exit.</li>
+<li><b>Rewards shape behaviour more than architecture.</b> Raising the exit reward from 10 to 25 gave the
+largest single gain. Penalties for standing still in fights made the policy steadily more random and the
+score fell, so we removed them and used positive rewards for dodging instead.</li>
+<li><b>One test is not enough.</b> Validation and our official-style test once disagreed for 400 updates; a
+larger test showed keycard skill slipping after we cut its practice share. Shipping now needs both.</li>
+<li><b>Known limits.</b> Several enemies at once, exits far from everything else, and very large real maps.
+More practice time on tier 4 and real maps is the clearest next step.</li>
+</ul>
+
+<h2>6. Playing by the rules</h2>
+<ul>
+<li>Every action comes from the trained network. There is no path-finding, no auto-aim and no hand-written
+behaviour. The only fixed logic is two masks taken from observation fields (no firing without an enemy in view,
+a USE cooldown so a moving door is not reversed), which the rules allow.</li>
+<li>During evaluation the agent sees only the official observations through the organisers' unmodified
+<code>doom_env</code>. Privileged game state is used only to compute training rewards.</li>
+<li>All code was written during the hackathon. Weights are in Git LFS; <code>env/</code>, <code>docs/</code>,
+<code>tests/</code> and <code>validate.py</code> match the latest template; the training code is in
+<code>training/</code> with a guide in <code>training/README.md</code>.</li>
+</ul>
+
+</body>
+</html>
