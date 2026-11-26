@@ -391,8 +391,19 @@ def main(argv=None) -> None:
     deadline = start + args.hours * 3600
 
     ent_coef = float(ck.get("ent_coef", args.ent)) if args.resume else args.ent
+    mix_seen = None
     evaluator = None
     while time.time() < deadline and (not args.max_updates or update < args.max_updates):
+        mix_file = run_dir / "tier_weights.json"
+        if mix_file.exists() and mix_file.stat().st_mtime != mix_seen:
+            mix_seen = mix_file.stat().st_mtime
+            try:
+                mix = json.loads(mix_file.read_text())
+                for t, w in zip(range(1, TIER_COUNT + 1), mix["weights"]):
+                    weights[t - 1] = float(w)
+                print(f"update {update}: practice mix now {list(weights[:])} ({mix.get('reason', '')})", flush=True)
+            except (json.JSONDecodeError, KeyError, OSError, ValueError) as e:
+                print(f"update {update}: ignored tier_weights.json ({e})", flush=True)
         if (run_dir / "STOP").exists():
             print("STOP file found: saving and shutting down", flush=True)
             break
