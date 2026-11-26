@@ -146,18 +146,18 @@ def summarise(results: list[dict]) -> dict:
     return out
 
 
-def run_one(weights: Path, procs: int) -> Path:
+def run_one(weights: Path, procs: int, per_tier: int = PER_TIER, out_dir: Path = OUT) -> Path:
     from doomai.maps.generate import seeds_for
 
-    jobs = [(t, s, str(weights), None) for t in (1, 2, 3, 4) for s in seeds_for("test", PER_TIER, start=10_000 * t)]
+    jobs = [(t, s, str(weights), None) for t in (1, 2, 3, 4) for s in seeds_for("test", per_tier, start=10_000 * t)]
     jobs += [(9, 0, str(weights), f"MAP{k:02d}") for k in FREEDOOM_MAPS]
     with mp.get_context("forkserver").Pool(procs) as pool:
         results = pool.map(play, jobs, chunksize=1)
     run, update = weights.parent.name, int(weights.stem.split("_u")[1]) if "_u" in weights.stem else 0
-    record = {"run": run, "update": update, "snapshot": f"{run}/{weights.stem}", "at": datetime.now().isoformat(timespec="seconds"), "per_tier": PER_TIER,
+    record = {"run": run, "update": update, "snapshot": f"{run}/{weights.stem}", "at": datetime.now().isoformat(timespec="seconds"), "per_tier": per_tier,
               "summary": summarise(results), "maps": results}
-    OUT.mkdir(parents=True, exist_ok=True)
-    path = OUT / f"{run}_u{update}.json"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / f"{run}_u{update}.json"
     path.write_text(json.dumps(record, indent=1))
     return path
 
@@ -168,9 +168,11 @@ def main() -> None:
     p.add_argument("--follow", default="", help="test every new snapshot of runs/<run>")
     p.add_argument("--procs", type=int, default=3)
     p.add_argument("--interval", type=int, default=120)
+    p.add_argument("--per-tier", type=int, default=PER_TIER, help="locked test levels per tier")
+    p.add_argument("--out-dir", default=str(OUT), help="where results go (keep final picks apart from runs/spec)")
     args = p.parse_args()
     for w in args.weights:
-        path = run_one(Path(w), args.procs)
+        path = run_one(Path(w), args.procs, args.per_tier, Path(args.out_dir))
         s = json.loads(path.read_text())["summary"]
         print(f"[{datetime.now():%H:%M:%S}] {w}: spec score {s['total']} {s['categories']} stopped {s['agent_stopped']}", flush=True)
     while args.follow:
