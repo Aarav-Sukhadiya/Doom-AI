@@ -24,7 +24,7 @@ from landmarks import LandmarkTracker  # noqa: E402
 TIER_COUNT = 4
 
 
-def worker_main(remote, worker_id: int, envs_per_worker: int, difficulty, weights, seed: int, map_dir: str, reward: dict | None = None, hard_share: float = 0.0):
+def worker_main(remote, worker_id: int, envs_per_worker: int, difficulty, weights, seed: int, map_dir: str, reward_cfg: dict | None = None, hard_share: float = 0.0):
     from doomai.envs.shaped import ShapedDoomEnv
     from doomai.maps.generate import generate, seeds_for
     from doomai.maps.grid import write_grid_wad
@@ -52,7 +52,7 @@ def worker_main(remote, worker_id: int, envs_per_worker: int, difficulty, weight
         counter[0] += 1
         path = Path(map_dir) / f"w{worker_id}_e{i}_{counter[0]}.wad"
         write_grid_wad(level.grid, path, player_angle=level.player_angle)
-        env = ShapedDoomEnv(str(path), "MAP01", episode_ticks=level.episode_ticks, reward=reward, subgoal_grid=level.grid)
+        env = ShapedDoomEnv(str(path), "MAP01", episode_ticks=level.episode_ticks, reward=reward_cfg, subgoal_grid=level.grid)
         return env, tier
 
     pending = [builder.submit(build, i) for i in range(envs_per_worker)]
