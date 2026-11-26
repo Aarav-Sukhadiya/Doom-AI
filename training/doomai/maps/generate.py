@@ -182,7 +182,7 @@ def _exit_switch(canvas: _Canvas, room: Room, rng: random.Random, dist: dict) ->
     for yy, xx in room.cells():
         for dy, dx in DIRS.values():
             wy, wx = yy + dy, xx + dx
-            if canvas.g[wy][wx] != "#":
+            if not (1 <= wy <= canvas.size - 2 and 1 <= wx <= canvas.size - 2) or canvas.g[wy][wx] != "#":
                 continue
             floor_neighbours = sum(canvas.g[wy + a][wx + b] not in "#X" for a, b in DIRS.values() if 0 <= wy + a < canvas.size and 0 <= wx + b < canvas.size)
             if floor_neighbours == 1:
@@ -299,6 +299,10 @@ def _build(tier: int, rng: random.Random, difficulty: float):
             open_rooms = [i for i in range(len(rooms)) if i not in _subtree(rooms, lock_room) and i not in blocked - set()]
             if tier == 4 and locks:
                 open_rooms = [i for i in _subtree(rooms, lock_rooms[0]) if i not in _subtree(rooms, lock_room)] or open_rooms
+            if len(open_rooms) > 1:
+                open_rooms = [i for i in open_rooms if i != 0]
+            elif tier in (3, 4):
+                return None
             key_room = max(open_rooms, key=lambda i: (rooms[i].depth, rng.random()))
             dy, dx = rooms[lock_room].door
             canvas.g[dy][dx] = colour
@@ -331,20 +335,47 @@ def _build(tier: int, rng: random.Random, difficulty: float):
     return _crop(canvas), exit_kind, locks
 
 
+EXPECTED_LOCKS = {1: 0, 2: 0, 3: 1, 4: 2}
+TICK_FLOOR = {1: 2100, 2: 3150, 3: 4200, 4: 4200}
+
+
+def _all_reachable(lines: list[str]) -> bool:
+    start = next((r, c) for r, line in enumerate(lines) for c, ch in enumerate(line) if ch == "P")
+    seen = {start}
+    queue = deque([start])
+    while queue:
+        r, c = queue.popleft()
+        for dy, dx in DIRS.values():
+            n = (r + dy, c + dx)
+            if n not in seen and lines[n[0]][n[1]] not in "#X":
+                seen.add(n)
+                queue.append(n)
+    open_cells = sum(ch not in "#X" for line in lines for ch in line)
+    return len(seen) == open_cells
+
+
 def generate(tier: int, seed: int, difficulty: float = 1.0) -> Level:
     """A solvable level for `tier` (1-4). `difficulty` in [0, 1] scales size and enemy count."""
     if tier not in TIERS:
         raise ValueError(f"tier must be one of {TIERS}")
     rng = random.Random(f"{tier}-{seed}-{difficulty:.3f}")
     for _ in range(50):
-        lines, exit_kind, locks = _build(tier, rng, difficulty)
-        if sum(ch == "P" for line in lines for ch in line) != 1:
+        try:
+            built = _build(tier, rng, difficulty)
+        except IndexError:
+            continue
+        if built is None:
+            continue
+        lines, exit_kind, locks = built
+        if sum(ch == "P" for line in lines for ch in line) != 1 or len(locks) != EXPECTED_LOCKS[tier]:
+            continue
+        if not _all_reachable(lines):
             continue
         moves = solve(lines)
         if moves is None:
             continue
         steps = moves * 2
-        ticks = int(min(10500, max(2100, steps * 4 * 3)))
+        ticks = int(min(10500, max(TICK_FLOOR[tier], steps * 4 * 5)))
         return Level("\n".join(lines), tier, seed, rng.randrange(0, 360, 45), ticks, exit_kind, locks, steps)
     raise RuntimeError(f"could not build a solvable tier {tier} level for seed {seed}")
 

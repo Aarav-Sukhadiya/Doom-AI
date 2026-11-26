@@ -45,6 +45,7 @@ THINGS = {
 }
 
 SOLID = {"#", "X"}
+KNOWN = SOLID | set(DOOR_STYLE) | set(THINGS) | {".", "E"}
 
 
 @dataclass
@@ -126,6 +127,9 @@ def _sectors(cells: list[str]) -> tuple[list[list[int]], list[tuple[str, str]]]:
 def compile_grid(grid: str, style_seed: int | None = None, player_angle: int = 0) -> str:
     """Return the TEXTMAP text for an ASCII layout."""
     cells = _parse(grid)
+    unknown = {ch for line in cells for ch in line} - KNOWN
+    if unknown:
+        raise ValueError(f"unknown grid characters: {sorted(unknown)}")
     rows, cols = len(cells), len(cells[0])
     owner, groups = _sectors(cells)
     styles = list(ROOM_STYLES)
@@ -189,7 +193,7 @@ def compile_grid(grid: str, style_seed: int | None = None, player_angle: int = 0
                 if nsid == sid:
                     continue
                 kind, nkind = groups[sid][0], groups[nsid][0]
-                front_is_me = kind == "room" or (kind == "door" and nkind == "exit")
+                front_is_me = kind == "room" or (kind == "door" and nkind == "exit") or (kind == "door" and nkind == "door" and sid < nsid)
                 if not front_is_me:
                     continue
                 add_run(("two", sid, nsid, side, line_pos), start, end)
@@ -212,7 +216,7 @@ def compile_grid(grid: str, style_seed: int | None = None, player_angle: int = 0
                 continue
             _, sid, nsid, _, _ = key
             kind, nkind = groups[sid][0], groups[nsid][0]
-            if nkind == "door":
+            if nkind == "door" and kind != "door":
                 tex, lock = DOOR_STYLE[groups[nsid][1]]
                 front = b.side(sid, top=tex)
                 back = b.side(nsid)

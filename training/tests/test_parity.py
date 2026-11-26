@@ -128,3 +128,22 @@ def test_landmark_tracker_records_locked_door_relative_to_agent(tmp_path):
     locked = feats[2]
     assert locked[0] == 1.0
     assert abs(locked[1] * 1024 - (256 - 96)) < 8 and abs(locked[2]) < 0.02
+
+
+@pytest.mark.parametrize("pattern", [[1, 1, 1, 1], [0, 1, 1, 1], [0, 1, 0, 1, 1, 1]])
+def test_turn_model_matches_engine_after_reset(pattern, tmp_path):
+    from landmarks import Odometry
+
+    env = make_env(str(write_grid_wad("#######\n#.....#\n#..P..#\n#.....#\n#######", tmp_path / "m.wad")), "MAP01", episode_ticks=400)
+    env.reset(seed=0)
+    odo = Odometry()
+    a0 = env.privileged_state()["angle"]
+    for turn in pattern + [1, 0, 1]:
+        action = np.zeros(9, np.int8)
+        action[4] = turn
+        predicted = odo.turn(action)
+        env.step(action)
+        a1 = env.privileged_state()["angle"]
+        assert abs(((a1 - a0 + 180) % 360 - 180) - predicted) < 1e-3
+        a0 = a1
+    env.close()

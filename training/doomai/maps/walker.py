@@ -28,7 +28,10 @@ def walk(env, lines: list[str], path: list[tuple[int, int]], max_steps: int = 30
     last_pos = None
     stuck = 0
     info = {}
-    for step in range(max_steps):
+    decisions = 0
+    for step in range(max_steps * 4):
+        if decisions >= max_steps:
+            break
         st = env.privileged_state()
         x, y, angle = st["x"], st["y"], st["angle"]
         r, c = targets[idx]
@@ -50,12 +53,13 @@ def walk(env, lines: list[str], path: list[tuple[int, int]], max_steps: int = 30
         stuck = 0 if moved else stuck + 1
         last_pos = (x, y)
         near_special = ch in "XRBYD" and math.hypot(tx - x, ty - y) < 100
-        if (near_special or stuck > 3) and step - last_use > 20:
+        if (near_special or stuck > 3) and decisions - last_use > 20:
             action[USE] = 1
-            last_use = step
+            last_use = decisions
         if ch in "RBYD" and math.hypot(tx - x, ty - y) < 20 and idx < len(targets) - 1:
             idx += 1
         _, _, term, trunc, info = env.step(action)
+        decisions += 1
         if term or trunc:
-            return {"exit_reached": bool(info.get("exit_reached")), "steps": step + 1, "dead": env.privileged_state()["dead"]}
+            return {"exit_reached": bool(info.get("exit_reached")), "steps": decisions, "dead": env.privileged_state()["dead"]}
     return {"exit_reached": False, "steps": max_steps, "dead": False}

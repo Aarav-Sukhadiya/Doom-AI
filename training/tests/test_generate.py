@@ -55,3 +55,25 @@ def test_scripted_walker_reaches_exit_in_engine(tier, tmp_path):
     result = walk(env, lines, solve_path(lines))
     env.close()
     assert result["exit_reached"]
+
+
+def test_bug_hunt_regressions():
+    generate(3, 1661, 0.75)
+    assert len(generate(4, 255, 0.0).locks) == 2
+    for seed in range(300):
+        assert len(generate(4, seed, 0.0).locks) == 2
+
+
+def test_unknown_grid_characters_are_rejected():
+    from doomai.maps.grid import compile_grid
+
+    with pytest.raises(ValueError):
+        compile_grid("#####\n#P Q#\n#####")
+
+
+def test_adjacent_doors_close_their_sectors():
+    from doomai.maps.grid import compile_grid
+
+    text = compile_grid("########\n#P.RB.E#\n########")
+    lines = [l for l in text.splitlines() if "twosided" in l]
+    assert len(lines) == 4 and sum("special" not in l for l in lines) == 1

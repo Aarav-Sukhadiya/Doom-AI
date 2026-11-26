@@ -19,7 +19,7 @@ VEL_FWD, VEL_RIGHT = 14, 15
 SLOW_TURN_TICS = 6
 SLOW_DEG = 320 / 65536 * 360
 FAST_DEG = 640 / 65536 * 360
-START_TICS = (0, 2)
+FIRST_TURN_TIC = 8
 BLEND = (1.6020745162454768, 2.821983769288885)
 
 RAY_RANGE = 1024.0
@@ -48,18 +48,19 @@ class Odometry:
         self.y = 0.0
         self.heading = 0.0
         self.turnheld = 0
-        self.step = 0
+        self.tic = 0
         self.prev_vel = None
 
     def turn(self, action) -> float:
+        """Doom counts held turn tics from the first tic, but the player only rotates from tic 8 after reset."""
         direction = int(action[TURN_LEFT]) - int(action[TURN_RIGHT])
-        tics = START_TICS[self.step] if self.step < len(START_TICS) else 4
-        self.step += 1
         delta = 0.0
-        for _ in range(tics):
+        for _ in range(4):
+            self.tic += 1
             if action[TURN_LEFT] or action[TURN_RIGHT]:
                 self.turnheld += 1
-                delta += direction * (SLOW_DEG if self.turnheld < SLOW_TURN_TICS else FAST_DEG)
+                if self.tic >= FIRST_TURN_TIC:
+                    delta += direction * (SLOW_DEG if self.turnheld < SLOW_TURN_TICS else FAST_DEG)
             else:
                 self.turnheld = 0
         return delta
