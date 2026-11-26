@@ -280,6 +280,7 @@ def main(argv=None) -> None:
     prev_action = np.zeros((B, 9), np.float32)
     use_cd = np.zeros(B, np.int64)
     ret_acc = np.zeros(B, np.float64)
+    disc_ret = np.zeros(B, np.float64)
 
     tier_hist = {t: deque(maxlen=100) for t in range(1, TIER_COUNT + 1)}
     recent = deque(maxlen=200)
@@ -318,6 +319,9 @@ def main(argv=None) -> None:
                         tier_hist[s["tier"]].append(s)
                         recent.append(s)
                 ret_acc = (ret_acc + rewards) * (1.0 - dones)
+                disc_ret = disc_ret * args.gamma + rewards
+                ret_norm.update(disc_ret)
+                disc_ret *= 1.0 - dones
                 buf["obs"].append(x)
                 buf["prev"].append(prev_t)
                 buf["allowed"].append(allowed)
@@ -336,9 +340,7 @@ def main(argv=None) -> None:
             x = to_tensors(stack(obs), device)
             _, last_value, _ = net(x, torch.from_numpy(prev_action).to(device), h, torch.from_numpy((use_cd == 0).astype(np.float32)).to(device))
 
-        rewards = torch.stack(buf["reward"])
-        ret_norm.update(rewards.cpu().numpy())
-        rewards = rewards / ret_norm.std
+        rewards = torch.stack(buf["reward"]) / ret_norm.std
         values = torch.stack(buf["value"])
         dones = torch.stack(buf["done"])
         adv, returns = gae(rewards, values, dones, last_value, args.gamma, args.lam)
