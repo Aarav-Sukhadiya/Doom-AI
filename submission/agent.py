@@ -8,7 +8,8 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from doomnet import USE_COOLDOWN, DoomNet, decode_action, preprocess, sample, to_tensors
+from doomnet import USE_COOLDOWN, DoomNet, decode_action, observe, sample, to_tensors
+from landmarks import LandmarkTracker
 
 SUBMISSION_DIR = Path(__file__).resolve().parent
 WEIGHTS_DIR = SUBMISSION_DIR / "weights"
@@ -22,7 +23,8 @@ class DoomAgent:
         config_path = WEIGHTS_DIR / "config.json"
         config = json.loads(config_path.read_text()) if config_path.exists() else {}
         self.greedy = bool(config.get("greedy", False))
-        self.net = DoomNet(hidden=int(config.get("hidden", 256)))
+        self.net = DoomNet(hidden=int(config.get("hidden", 256)), slots=bool(config.get("slots", False)))
+        self.tracker = LandmarkTracker()
         weights = WEIGHTS_DIR / "model.pt"
         if weights.exists():
             state = torch.load(weights, map_location="cpu", weights_only=True)
@@ -36,11 +38,13 @@ class DoomAgent:
         self.h = self.net.initial_state(1, self.device)
         self.prev_action = np.zeros(9, np.float32)
         self.use_cooldown = 0
+        self.tracker.reset()
+        self.first = True
 
     @torch.inference_mode()
     def act(self, observation: dict) -> np.ndarray:
         try:
-            x = to_tensors({k: v[None] for k, v in preprocess(observation).items()}, self.device)
+            x = to_tensors({k: v[None] for k, v in observe(observation, self.tracker, None if self.first else self.prev_action).items()}, self.device)
             prev = torch.from_numpy(self.prev_action[None]).to(self.device)
             allowed = torch.tensor([1.0 if self.use_cooldown == 0 else 0.0], device=self.device)
             logits, _, self.h = self.net(x, prev, self.h, allowed)
@@ -48,6 +52,7 @@ class DoomAgent:
             action = decode_action(choice)[0]
         except Exception:
             action = NOOP.copy()
+        self.first = False
         self.use_cooldown = USE_COOLDOWN if action[7] else max(0, self.use_cooldown - 1)
         self.prev_action = action.astype(np.float32)
         return action

@@ -8,6 +8,9 @@ Inputs (all ego-centric, as the official wrapper provides them):
   rays      64 rays: distance + one-hot hit type, read by a circular 1-D conv (no seam behind the player)
   entities  up to 32 visible things: features + type embedding, pooled over the mask (any number of enemies)
   vitals    health, armour, ammo, keys, velocity, plus the agent's previous action
+  slots     landmark memory (landmarks.py): where keys, locked doors, doors and pickups were seen,
+            relative to the agent now; read by learned attention and added to the GRU input through a
+            zero-initialised layer, so turning it on leaves an existing policy unchanged at first
 A GRU carries short-term memory between decisions. The action head is factorised into five small
 choices (move, strafe, turn, attack, use); weapon switching is left to the engine's auto-switch.
 """
@@ -18,6 +21,8 @@ import numpy as np
 import torch
 from torch import nn
 from torch.nn import functional as F
+
+from landmarks import NUM_SLOTS, SLOT_FEATURES, LandmarkTracker
 
 NUM_RAYS = 64
 NUM_HIT_TYPES = 6
@@ -63,6 +68,16 @@ def preprocess(obs: dict) -> dict[str, np.ndarray]:
     }
 
 
+def observe(obs: dict, tracker: LandmarkTracker, action) -> dict[str, np.ndarray]:
+    """preprocess() plus landmark slot features; action is the one that led to obs (None after reset)."""
+    out = preprocess(obs)
+    try:
+        out["slots"] = tracker.observe(obs, action)
+    except Exception:
+        out["slots"] = np.zeros((NUM_SLOTS, SLOT_FEATURES), np.float32)
+    return out
+
+
 def stack(batch: list[dict[str, np.ndarray]]) -> dict[str, np.ndarray]:
     return {k: np.stack([b[k] for b in batch]) for k in batch[0]}
 
@@ -90,9 +105,10 @@ def encode_prev_action(buttons: np.ndarray) -> np.ndarray:
 
 
 class DoomNet(nn.Module):
-    def __init__(self, hidden: int = 256):
+    def __init__(self, hidden: int = 256, slots: bool = False):
         super().__init__()
         self.hidden = hidden
+        self.use_slots = slots
         self.cnn = nn.Sequential(
             nn.Conv2d(4, 32, 5, stride=2), nn.ReLU(),
             nn.Conv2d(32, 64, 3, stride=2), nn.ReLU(),
@@ -109,6 +125,15 @@ class DoomNet(nn.Module):
         self.ent_mlp = nn.Sequential(nn.Linear(NUM_ENTITY_FEATURES + 16, 64), nn.ReLU(), nn.Linear(64, 64), nn.ReLU())
         self.vit_fc = nn.Sequential(nn.Linear(NUM_VITALS + NUM_BUTTONS, 64), nn.ReLU())
         self.trunk = nn.Sequential(nn.Linear(256 + 128 + 128 + 64, hidden), nn.ReLU())
+        if slots:
+            self.slot_type = nn.Embedding(NUM_SLOTS, 8)
+            self.slot_mlp = nn.Sequential(nn.Linear(SLOT_FEATURES + 8, 64), nn.ReLU(), nn.Linear(64, 64), nn.ReLU())
+            self.slot_q = nn.Linear(hidden, 64)
+            self.slot_k = nn.Linear(64, 64)
+            self.slot_v = nn.Linear(64, 64)
+            self.slot_out = nn.Linear(64, hidden)
+            nn.init.zeros_(self.slot_out.weight)
+            nn.init.zeros_(self.slot_out.bias)
         self.gru = nn.GRUCell(hidden, hidden)
         self.policy = nn.Linear(hidden, sum(HEAD_SIZES))
         self.value = nn.Linear(hidden, 1)
@@ -132,7 +157,18 @@ class DoomNet(nn.Module):
         e_max = e.masked_fill(m < 0.5, -1e4).max(1).values
         e_max = torch.where(any_entity, e_max, torch.zeros_like(e_max))
         v = self.vit_fc(torch.cat([x["vitals"], prev_action], dim=-1))
-        return self.trunk(torch.cat([img, r, torch.cat([e_mean, e_max], -1), v], dim=-1))
+        z = self.trunk(torch.cat([img, r, torch.cat([e_mean, e_max], -1), v], dim=-1))
+        if self.use_slots:
+            z = z + self.read_slots(x["slots"], z)
+        return z
+
+    def read_slots(self, slots: torch.Tensor, z: torch.Tensor) -> torch.Tensor:
+        types = self.slot_type.weight.unsqueeze(0).expand(slots.shape[0], -1, -1)
+        s = self.slot_mlp(torch.cat([slots, types], dim=-1))
+        score = (self.slot_q(z).unsqueeze(1) * self.slot_k(s)).sum(-1) / 8.0
+        score = score.masked_fill(slots[..., 0] < 0.5, -1e9)
+        att = torch.softmax(score, dim=-1).unsqueeze(-1)
+        return self.slot_out((att * self.slot_v(s)).sum(1))
 
     def heads(self, h: torch.Tensor, use_allowed: torch.Tensor):
         return mask_use(self.policy(h), use_allowed), self.value(h).squeeze(-1)

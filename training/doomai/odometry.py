@@ -11,58 +11,12 @@ from pathlib import Path
 
 import numpy as np
 
-TURN_LEFT, TURN_RIGHT = 4, 5
-VEL_FWD, VEL_RIGHT = 14, 15
+import sys
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "submission"))
 
-SLOW_TURN_TICS = 6
-SLOW_DEG = 320 / 65536 * 360
-FAST_DEG = 640 / 65536 * 360
-START_TICS = (0, 2)
-
-
-class Odometry:
-    def __init__(self, blend: tuple[float, float]):
-        self.blend = blend
-        self.reset()
-
-    def reset(self) -> None:
-        self.x = 0.0
-        self.y = 0.0
-        self.heading = 0.0
-        self.turnheld = 0
-        self.step = 0
-        self.prev_vel = None
-
-    def turn(self, action: np.ndarray) -> float:
-        direction = int(action[TURN_LEFT]) - int(action[TURN_RIGHT])
-        tics = START_TICS[self.step] if self.step < len(START_TICS) else 4
-        self.step += 1
-        delta = 0.0
-        for _ in range(tics):
-            if action[TURN_LEFT] or action[TURN_RIGHT]:
-                self.turnheld += 1
-                delta += direction * (SLOW_DEG if self.turnheld < SLOW_TURN_TICS else FAST_DEG)
-            else:
-                self.turnheld = 0
-        return delta
-
-    def update(self, action: np.ndarray, vitals: np.ndarray) -> None:
-        h0 = self.heading
-        self.heading = (self.heading + self.turn(action)) % 360.0
-        vel = (float(vitals[VEL_FWD]), float(vitals[VEL_RIGHT]))
-        if self.prev_vel is not None:
-            dx0, dy0 = _ego_to_world(*self.prev_vel, h0)
-            dx1, dy1 = _ego_to_world(*vel, self.heading)
-            a, b = self.blend
-            self.x += a * dx0 + b * dx1
-            self.y += a * dy0 + b * dy1
-        self.prev_vel = vel
-
-
-def _ego_to_world(fwd: float, right: float, heading_deg: float) -> tuple[float, float]:
-    h = math.radians(heading_deg)
-    return fwd * math.cos(h) + right * math.sin(h), fwd * math.sin(h) - right * math.cos(h)
+from landmarks import TURN_LEFT, TURN_RIGHT, VEL_FWD, VEL_RIGHT, Odometry  # noqa: E402
+from landmarks import ego_to_world as _ego_to_world  # noqa: E402
 
 
 def _record(env, steps: int, seed: int):

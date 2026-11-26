@@ -30,7 +30,8 @@ import torch
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "submission"))
 
-from doomnet import USE_COOLDOWN, DoomNet, decode_action, log_prob_entropy, preprocess, sample, stack, to_tensors  # noqa: E402
+from doomnet import USE_COOLDOWN, DoomNet, decode_action, log_prob_entropy, observe, sample, stack, to_tensors  # noqa: E402
+from landmarks import LandmarkTracker  # noqa: E402
 
 TIER_COUNT = 4
 
@@ -41,24 +42,36 @@ def worker_main(remote, worker_id: int, envs_per_worker: int, difficulty, weight
     from doomai.maps.generate import generate, seeds_for
     from doomai.maps.grid import write_grid_wad
 
+    from concurrent.futures import ThreadPoolExecutor
+
     rng = np.random.default_rng(seed)
+    build_rng = np.random.default_rng(seed + 7919)
     train_seeds = seeds_for("train", 200000)
     envs = [None] * envs_per_worker
+    trackers = [LandmarkTracker() for _ in range(envs_per_worker)]
     tiers = [0] * envs_per_worker
     plays = [0] * envs_per_worker
-    level_no = [0]
+    counter = [0]
+    builder = ThreadPoolExecutor(max_workers=1)
+
+    def build(i):
+        w = np.array(weights[:], np.float64)
+        tier = int(build_rng.choice(TIER_COUNT, p=w / w.sum())) + 1
+        d = float(np.clip(difficulty[tier - 1] + build_rng.normal(0, 0.1), 0.0, 1.0))
+        level = generate(tier, int(build_rng.choice(train_seeds)), difficulty=round(d, 2))
+        counter[0] += 1
+        path = Path(map_dir) / f"w{worker_id}_e{i}_{counter[0] % 8}.wad"
+        write_grid_wad(level.grid, path, player_angle=level.player_angle)
+        return ShapedDoomEnv(str(path), "MAP01", episode_ticks=level.episode_ticks), tier
+
+    pending = [builder.submit(build, i) for i in range(envs_per_worker)]
 
     def new_level(i):
-        w = np.array(weights[:], np.float64)
-        tier = int(rng.choice(TIER_COUNT, p=w / w.sum())) + 1
-        d = float(np.clip(difficulty[tier - 1] + rng.normal(0, 0.1), 0.0, 1.0))
-        level = generate(tier, int(rng.choice(train_seeds)), difficulty=round(d, 2))
-        level_no[0] += 1
-        path = Path(map_dir) / f"w{worker_id}_e{i}_{level_no[0] % 4}.wad"
-        write_grid_wad(level.grid, path, player_angle=level.player_angle)
+        env, tier = pending[i].result()
+        pending[i] = builder.submit(build, i)
         if envs[i] is not None:
             envs[i].close()
-        envs[i] = ShapedDoomEnv(str(path), "MAP01", episode_ticks=level.episode_ticks)
+        envs[i] = env
         tiers[i] = tier
         plays[i] = 0
 
@@ -67,7 +80,8 @@ def worker_main(remote, worker_id: int, envs_per_worker: int, difficulty, weight
             new_level(i)
         plays[i] += 1
         obs, _ = envs[i].reset(seed=int(rng.integers(1 << 30)))
-        return preprocess(obs)
+        trackers[i].reset()
+        return observe(obs, trackers[i], None)
 
     try:
         while True:
@@ -84,7 +98,7 @@ def worker_main(remote, worker_id: int, envs_per_worker: int, difficulty, weight
                         stats = dict(info["episode_stats"], tier=tiers[i], terms=info["episode_terms"])
                         pre = reset(i)
                     else:
-                        pre = preprocess(obs)
+                        pre = observe(obs, trackers[i], action)
                     out.append((pre, reward, done, stats))
                 remote.send(out)
             elif cmd == "close":
@@ -98,6 +112,12 @@ def worker_main(remote, worker_id: int, envs_per_worker: int, difficulty, weight
         for env in envs:
             if env is not None:
                 env.close()
+        for f in pending:
+            try:
+                f.result()[0].close()
+            except Exception:
+                pass
+        builder.shutdown(wait=False)
 
 
 class Workers:
@@ -213,6 +233,7 @@ def main(argv=None) -> None:
     p.add_argument("--seed", type=int, default=1)
     p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     p.add_argument("--save-every", type=int, default=10)
+    p.add_argument("--slots", action="store_true", help="enable the landmark slot memory read path")
     args = p.parse_args(argv)
 
     torch.set_num_threads(1)
@@ -225,7 +246,8 @@ def main(argv=None) -> None:
 
     writer = SummaryWriter(str(run_dir / "tb"))
 
-    net = DoomNet().to(device)
+    net = DoomNet(slots=args.slots).to(device)
+    (run_dir / "config.json").write_text(json.dumps({"slots": args.slots, "hidden": net.hidden}))
     opt = torch.optim.Adam(net.parameters(), lr=args.lr, eps=1e-5)
     update, total_steps = 0, 0
     difficulty = mp.Array("d", [args.start_difficulty] * TIER_COUNT, lock=False)
@@ -245,7 +267,10 @@ def main(argv=None) -> None:
         print(f"resumed {args.resume} at update {update}, {total_steps} steps", flush=True)
     elif args.init:
         state = torch.load(args.init, map_location=device, weights_only=False)
-        net.load_state_dict(state["model"] if "model" in state else state)
+        missing, unexpected = net.load_state_dict(state["model"] if "model" in state else state, strict=False)
+        if unexpected or any(not k.startswith("slot_") for k in missing):
+            raise RuntimeError(f"--init mismatch: missing {missing}, unexpected {unexpected}")
+        print(f"initialised from {args.init}; new parameters: {missing}", flush=True)
 
     map_dir = tempfile.mkdtemp(prefix=f"doomai_{args.run}_")
     workers = Workers(args.workers, args.envs_per_worker, difficulty, weights, args.seed * 1000, map_dir)

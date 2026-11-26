@@ -11,22 +11,26 @@ from doomai.maps.grid import write_grid_wad
 from doomai.ppo import REPO
 
 import doomnet
-from doomnet import USE_COOLDOWN, DoomNet, decode_action, preprocess, sample, stack, to_tensors
+from doomnet import USE_COOLDOWN, DoomNet, decode_action, observe, sample, stack, to_tensors
+from landmarks import LandmarkTracker
 
 
 def trainer_actions(net, env, seed, steps):
     obs, _ = env.reset(seed=seed)
+    tracker = LandmarkTracker()
+    last = None
     h = net.initial_state(1)
     prev = np.zeros((1, 9), np.float32)
     use_cd = np.zeros(1, np.int64)
     out = []
     with torch.no_grad():
         for _ in range(steps):
-            x = to_tensors(stack([preprocess(obs)]), "cpu")
+            x = to_tensors(stack([observe(obs, tracker, last)]), "cpu")
             allowed = torch.from_numpy((use_cd == 0).astype(np.float32))
             logits, _, h = net(x, torch.from_numpy(prev), h, allowed)
             action = decode_action(sample(logits, greedy=True).numpy())
             out.append(action[0].copy())
+            last = action[0].copy()
             use_cd = np.where(action[:, 7] == 1, USE_COOLDOWN, np.maximum(use_cd - 1, 0))
             prev = action.astype(np.float32)
             obs, _, term, trunc, _ = env.step(action[0])
@@ -48,17 +52,17 @@ def agent_actions(agent, env, seed, steps):
     return out
 
 
-@pytest.mark.parametrize("tier", [2, 3])
-def test_trainer_and_submitted_agent_choose_identical_actions(tier, tmp_path, monkeypatch):
+@pytest.mark.parametrize("tier,slots", [(2, False), (3, True)])
+def test_trainer_and_submitted_agent_choose_identical_actions(tier, slots, tmp_path, monkeypatch):
     torch.manual_seed(7)
-    net = DoomNet().eval()
+    net = DoomNet(slots=slots).eval()
     with torch.no_grad():
         for p in net.parameters():
             p.add_(torch.randn_like(p) * 0.05)
     weights = tmp_path / "w"
     weights.mkdir()
     torch.save(net.state_dict(), weights / "model.pt")
-    (weights / "config.json").write_text(json.dumps({"greedy": True}))
+    (weights / "config.json").write_text(json.dumps({"greedy": True, "slots": slots}))
 
     import importlib.util
 
@@ -98,3 +102,29 @@ def test_agent_survives_garbage_observations():
     for obs in [good, *bad, good]:
         action = np.asarray(agent.act(obs))
         assert action.shape == (9,) and set(np.unique(action)) <= {0, 1}
+
+
+def test_slot_handover_is_exact():
+    torch.manual_seed(3)
+    base = DoomNet(slots=False).eval()
+    with_slots = DoomNet(slots=True).eval()
+    missing, unexpected = with_slots.load_state_dict(base.state_dict(), strict=False)
+    assert not unexpected and all(k.startswith("slot_") for k in missing)
+    x = {k: torch.from_numpy(v) for k, v in stack([observe(S.observation_space().sample(), LandmarkTracker(), None) for _ in range(16)]).items()}
+    x["slots"] = torch.randn_like(x["slots"]).abs()
+    prev, h, allowed = torch.zeros(16, 9), torch.randn(16, base.hidden), torch.ones(16)
+    with torch.no_grad():
+        a = base(x, prev, h, allowed)
+        b = with_slots(x, prev, h, allowed)
+    assert torch.equal(a[0], b[0]) and torch.equal(a[1], b[1])
+
+
+def test_landmark_tracker_records_locked_door_relative_to_agent(tmp_path):
+    env = make_env(str(write_grid_wad("#######\n#P..B.E#\n#######", tmp_path / "m.wad")), "MAP01", episode_ticks=400)
+    obs, _ = env.reset(seed=0)
+    tracker = LandmarkTracker()
+    feats = tracker.observe(obs, None)
+    env.close()
+    locked = feats[2]
+    assert locked[0] == 1.0
+    assert abs(locked[1] * 1024 - (256 - 96)) < 8 and abs(locked[2]) < 0.02
