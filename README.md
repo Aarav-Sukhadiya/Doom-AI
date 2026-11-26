@@ -51,9 +51,12 @@ learn skills that carry over to levels it has never seen, and the competition te
 | Level maker: turns simple text drawings into real DOOM levels, matches the organisers' test levels exactly, supports doors, coloured locked doors, keys, enemies, items and both kinds of exit | ✅ Done |
 | Step counting: the agent can estimate where it is from its own movements (about 1% error after 500 steps) | ✅ Done |
 | Speed check: the game runs about 16,000 agent decisions per second on our laptop | ✅ Done |
-| Random level generator (easy to hard) | 🔄 In progress |
-| Neural network, landmark memory and learning loop | ⏳ Next |
-| Training, testing on unseen levels, final agent | ⏳ Overnight |
+| Random level generator for all four tiers (combat arenas, multi-room mazes with doors, keys behind locked doors, two-lock gauntlets). A scripted test walker finished 48 out of 48 generated levels in the real game | ✅ Done |
+| Scoring for practice: points for exploring, keys, doors, kills and the exit; penalties for damage and dying. Each event is tested to count exactly once | ✅ Done |
+| Neural network, with its senses, short-term memory and landmark memory | ✅ Built (decides in under 2 ms per move) |
+| Learning loop, with difficulty that rises by itself as the agent improves | ✅ Running at about 2,300 decisions per second |
+| Check that practice and evaluation behave identically (same moves from the same situation) | ✅ Passing |
+| Training, testing on unseen levels, final agent | 🔄 Training now, overnight run next |
 
 ## 5. Submission
 
