@@ -36,9 +36,13 @@ def main() -> None:
     p.add_argument("--margin", type=float, default=0.3)
     p.add_argument("--interval", type=int, default=300)
     p.add_argument("--per-tier", type=int, default=20, help="levels per tier in the trainer's validation (for the commit message)")
+    p.add_argument("--shipped-spec", type=float, default=None, help="spec-test total of the shipped agent; when given, a snapshot must also not fall below it")
+    p.add_argument("--spec-margin", type=float, default=0.5, help="how far below the shipped spec total a snapshot may be and still ship")
     args = p.parse_args()
     run_dir = REPO / "runs" / args.run
     best = args.shipped_score
+    best_spec = args.shipped_spec
+    spec_dir = REPO / "runs" / "spec"
     seen: set[str] = set()
     log(f"watching {run_dir}, shipped score {best}, margin {args.margin}")
     while True:
@@ -61,6 +65,17 @@ def main() -> None:
             snap = f"model_u{update}.pt"
             if not (run_dir / snap).exists():
                 continue
+            spec = None
+            if best_spec is not None:
+                spec_file = spec_dir / f"{args.run}_u{update}.json"
+                if not spec_file.exists():
+                    log(f"{ev.name}: waiting for the spec test of update {update}")
+                    seen.discard(ev.name)
+                    continue
+                spec = json.loads(spec_file.read_text())["summary"]["total"]
+                if spec < best_spec - args.spec_margin:
+                    log(f"update {update}: validation {score:.3f} passes but spec test {spec:.2f} is below the shipped {best_spec:.2f}; not shipping")
+                    continue
             pkg = run([sys.executable, "-m", "doomai.package", "--run", args.run, "--checkpoint", snap])
             if pkg.returncode != 0:
                 log(f"package failed: {pkg.stderr[-500:]}")
@@ -71,9 +86,10 @@ def main() -> None:
                 run(["git", "checkout", "--", "submission/weights"])
                 continue
             run(["git", "add", "submission/weights"])
+            spec_line = f" and spec-test total {spec:.2f} (shipped {best_spec:.2f})" if spec is not None else ""
             msg = (f"Auto-ship {args.run} update {update}: validation score {score:.3f}\n\n"
                    f"Beat the previously shipped score {best:.3f} by at least {args.margin} on the same\n"
-                   f"validation levels ({args.per_tier} per tier) and passed validate.py.\n\n"
+                   f"validation levels ({args.per_tier} per tier){spec_line}, and passed validate.py.\n\n"
                    "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>")
             commit = run(["git", "commit", "-m", msg, "--", "submission/weights"])
             if commit.returncode != 0:
@@ -83,6 +99,8 @@ def main() -> None:
             log(f"shipped update {update} (push rc {push.returncode})")
             if push.returncode == 0:
                 best = score
+                if spec is not None:
+                    best_spec = spec
         time.sleep(args.interval)
 
 

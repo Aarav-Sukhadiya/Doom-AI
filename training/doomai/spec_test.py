@@ -4,7 +4,7 @@
     python -m doomai.spec_test --follow main18                             # every new snapshot of a run
 
 What it copies from the spec:
-- Unseen maps in four tiers, played in order of difficulty with fixed seeds: tier 1 combat & survival,
+- Unseen maps in four tiers (25 each, so a few lucky or unlucky maps move the total little), played in order of difficulty with fixed seeds: tier 1 combat & survival,
   tier 2 multi-room exploration with doors, tier 3 keycards and locked doors, tier 4 everything with
   more enemies and two locks. They come from the locked test split of the level generator, which is
   never used for training or for choosing which snapshot ships. The held-out Freedoom 2 maps
@@ -43,7 +43,7 @@ REPO = Path(__file__).resolve().parents[2]
 OUT = REPO / "runs" / "spec"
 TIER_WEIGHT = {1: 1, 2: 2, 3: 3, 4: 4}
 TIER_NAME = {1: "Combat & survival", 2: "Multi-room exploration", 3: "Long-horizon progression", 4: "Full gauntlet", 9: "Freedoom MAP21-32"}
-PER_TIER = 10
+PER_TIER = 25
 FREEDOOM_MAPS = range(21, 33)
 FREEDOOM_TICKS = 4200
 DECISION_BUDGET_S = 0.040
@@ -154,7 +154,7 @@ def run_one(weights: Path, procs: int) -> Path:
     with mp.get_context("forkserver").Pool(procs) as pool:
         results = pool.map(play, jobs, chunksize=1)
     run, update = weights.parent.name, int(weights.stem.split("_u")[1]) if "_u" in weights.stem else 0
-    record = {"run": run, "update": update, "snapshot": f"{run}/{weights.stem}", "at": datetime.now().isoformat(timespec="seconds"),
+    record = {"run": run, "update": update, "snapshot": f"{run}/{weights.stem}", "at": datetime.now().isoformat(timespec="seconds"), "per_tier": PER_TIER,
               "summary": summarise(results), "maps": results}
     OUT.mkdir(parents=True, exist_ok=True)
     path = OUT / f"{run}_u{update}.json"
