@@ -22,7 +22,8 @@ import numpy as np
 
 REPO = Path(__file__).resolve().parents[2]
 TIERS = (1, 2, 3, 4)
-TIER_WEIGHT = {0: 1.0, 1: 1.0, 2: 2.0, 3: 3.0, 4: 4.0}
+TIER_WEIGHT = {0: 1.0, 1: 1.0, 2: 2.0, 3: 3.0, 4: 4.0, 9: 0.0}
+FREEDOOM_TICKS = 4200
 
 
 def episode_score(r: dict) -> float:
@@ -64,7 +65,8 @@ def _load_agent(weights: str, greedy: bool):
 
 
 def _run(job):
-    tier, seed, weights, greedy, wad = job
+    tier, seed, weights, greedy, wad = job[:5]
+    map_name = job[5] if len(job) > 5 else "MAP01"
     import torch
 
     torch.set_num_threads(1)
@@ -75,12 +77,12 @@ def _run(job):
     agent = _load_agent(weights, greedy)
     with tempfile.TemporaryDirectory() as tmp:
         if wad:
-            path, ticks = wad, 2100
+            path, ticks = wad, (FREEDOOM_TICKS if tier == 9 else 2100)
         else:
             level = generate(tier, seed, difficulty=1.0)
             path = str(write_grid_wad(level.grid, Path(tmp) / "m.wad", player_angle=level.player_angle))
             ticks = level.episode_ticks
-        env = ShapedDoomEnv(path, "MAP01", episode_ticks=ticks)
+        env = ShapedDoomEnv(path, map_name, episode_ticks=ticks)
         obs, _ = env.reset(seed=seed)
         agent.reset()
         while True:
@@ -88,14 +90,19 @@ def _run(job):
             if term or trunc:
                 break
         env.close()
-    return dict(info["episode_stats"], tier=tier, seed=seed, terms=info["episode_terms"])
+    return dict(info["episode_stats"], tier=tier, seed=seed, map=map_name if wad else None, terms=info["episode_terms"])
 
 
-def evaluate(weights: str, split: str = "val", per_tier: int = 20, tiers=TIERS, greedy: bool = False, procs: int = 12):
+def evaluate(weights: str, split: str = "val", per_tier: int = 20, tiers=TIERS, greedy: bool = False, procs: int = 12, freedoom: int = 0):
     from doomai.maps.generate import seeds_for
 
     jobs = [(t, s, weights, greedy, None) for t in tiers for s in seeds_for(split, per_tier, start=10_000 * t)]
     jobs.append((0, 0, weights, greedy, str(REPO / "maps" / "two_rooms.wad")))
+    if freedoom:
+        import vizdoom
+
+        iwad = str(Path(vizdoom.__file__).parent / "freedoom2.wad")
+        jobs += [(9, k, weights, greedy, iwad, f"MAP{k:02d}") for k in range(1, freedoom + 1)]
     with mp.get_context("forkserver").Pool(procs) as pool:
         results = pool.map(_run, jobs, chunksize=1)
     summary = {}
@@ -103,7 +110,7 @@ def evaluate(weights: str, split: str = "val", per_tier: int = 20, tiers=TIERS, 
     summary["score"] = round(weighted / sum(TIER_WEIGHT[r["tier"]] for r in results), 3)
     for t in sorted({r["tier"] for r in results}):
         rs = [r for r in results if r["tier"] == t]
-        summary[f"tier{t}" if t else "two_rooms"] = {
+        summary["freedoom2" if t == 9 else f"tier{t}" if t else "two_rooms"] = {
             k: round(float(np.mean([r[k] for r in rs])), 3) for k in ("exit", "dead", "kills", "sectors", "keys", "doors_opened", "steps")
         } | {"n": len(rs)}
     return summary, results
@@ -118,8 +125,9 @@ def main() -> None:
     p.add_argument("--greedy", action="store_true")
     p.add_argument("--procs", type=int, default=12)
     p.add_argument("--out", default="")
+    p.add_argument("--freedoom", type=int, default=0, help="also play Freedoom 2 MAP01..MAPnn (reported separately, weight 0 in the score)")
     args = p.parse_args()
-    summary, results = evaluate(args.weights, args.split, args.per_tier, args.tiers, args.greedy, args.procs)
+    summary, results = evaluate(args.weights, args.split, args.per_tier, args.tiers, args.greedy, args.procs, args.freedoom)
     print(json.dumps(summary, indent=2))
     if args.out:
         Path(args.out).write_text(json.dumps({"summary": summary, "episodes": results}, indent=2))
