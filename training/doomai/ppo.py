@@ -17,6 +17,7 @@ import json
 import math
 import multiprocessing as mp
 import os
+import subprocess
 import sys
 import tempfile
 import time
@@ -36,6 +37,64 @@ from doomnet import USE_COOLDOWN, DoomNet, decode_action, log_prob_entropy, obse
 from landmarks import LandmarkTracker  # noqa: E402
 
 TIER_COUNT = 4
+KL_BAND = (0.005, 0.03)
+
+GUIDE = """
+# How to read this dashboard
+
+The x-axis of every chart is the **update number**: all games play 128 decisions each, then the
+network learns once. Use the *Relative* horizontal axis for hours. Set smoothing to about 0.8.
+
+Open the **CUSTOM SCALARS** tab. Panels, top to bottom:
+
+1. **Is it winning?** *Validation score* is the most honest curve: every snapshot is scored on the same
+   unseen full-difficulty levels (higher is better; the shipped agent is the bar to beat).
+   *Exit rate* and *practice difficulty* are measured on the practice levels: when the curriculum
+   makes a tier harder its exit rate dips, so read them together. Difficulty rising toward 1.0 is progress.
+2. **How it plays:** deaths (lower is better), keys and doors (higher), areas explored (higher), and
+   *time used*: the share of the time limit each episode takes. Near 1.0 means it runs out of time.
+3. **Is learning healthy?** These should stay inside their bands rather than go up or down:
+   entropy (how random the choices are) near its target; KL (how much one update changes the
+   policy) between the two dashed lines; explained variance (how well it predicts its own future
+   reward) between 0.5 and 1.
+4. **Where reward comes from:** the exit should be the largest source; if exploring or killing
+   dominates while exits stay flat, the agent is farming side rewards.
+5. **Speed and stability:** decisions per second; worker restarts and skipped updates should stay flat.
+"""
+
+LAYOUT = {
+    "1 Is it winning?": {
+        "Validation score on fixed unseen levels (higher is better)": ["Multiline", [r"eval/score"]],
+        "Validation exit rate per tier (unseen, full difficulty)": ["Multiline", [r"eval/tier\d_exit"]],
+        "Practice exit rate per tier (higher is better)": ["Multiline", [r"tier\d/exit"]],
+        "Practice difficulty per tier (rises as it improves, goal 1.0)": ["Multiline", [r"curriculum/difficulty_t\d"]],
+    },
+    "2 How it plays": {
+        "Deaths per episode (lower is better)": ["Multiline", [r"tier\d/dead"]],
+        "Keys picked up per episode (higher is better)": ["Multiline", [r"tier\d/keys"]],
+        "Doors opened per episode (higher is better)": ["Multiline", [r"tier\d/doors_opened"]],
+        "Areas explored per episode (higher is better)": ["Multiline", [r"tier\d/sectors"]],
+        "Share of time limit used (near 1.0 = running out of time)": ["Multiline", [r"tier\d/time_used"]],
+        "Enemies killed per episode": ["Multiline", [r"tier\d/kills"]],
+    },
+    "3 Is learning healthy? (stay inside the bands)": {
+        "Entropy vs target (randomness of choices)": ["Multiline", [r"ppo/ent$", r"ref/entropy_target"]],
+        "KL per update (between the dashed band)": ["Multiline", [r"ppo/kl$", r"ref/kl_(low|high)"]],
+        "Explained variance (0.5 to 1 is healthy)": ["Multiline", [r"ppo/explained_variance", r"ref/ev_low"]],
+        "Clip fraction (0.05 to 0.3)": ["Multiline", [r"ppo/clipfrac"]],
+        "Value loss and gradient size": ["Multiline", [r"ppo/vf", r"ppo/grad"]],
+        "Entropy coefficient (self-adjusting)": ["Multiline", [r"ppo/entropy_coef"]],
+    },
+    "4 Where reward comes from": {
+        "Reward per episode by source": ["Multiline", [r"reward_terms/.*"]],
+        "Total reward per episode by tier": ["Multiline", [r"tier\d/return"]],
+    },
+    "5 Speed and stability": {
+        "Decisions per second": ["Multiline", [r"perf/decisions_per_s"]],
+        "Share of time spent playing vs learning": ["Multiline", [r"perf/rollout_share"]],
+        "Worker restarts and skipped updates (should stay flat)": ["Multiline", [r"health/.*"]],
+    },
+}
 
 
 def worker_main(remote, worker_id: int, envs_per_worker: int, difficulty, weights, seed: int, map_dir: str):
@@ -99,7 +158,7 @@ def worker_main(remote, worker_id: int, envs_per_worker: int, difficulty, weight
                     done = term or trunc
                     stats = None
                     if done:
-                        stats = dict(info["episode_stats"], tier=tiers[i], terms=info["episode_terms"])
+                        stats = dict(info["episode_stats"], tier=tiers[i], terms=info["episode_terms"], cap=envs[i].episode_ticks / 4)
                         pre = reset(i)
                     else:
                         pre = observe(obs, trackers[i], action)
@@ -146,10 +205,18 @@ class Workers:
         return [o for r in self.remotes for o in r.recv()]
 
     def step(self, actions: np.ndarray) -> tuple[list, int]:
-        for i, r in enumerate(self.remotes):
-            r.send(("step", actions[i * self.per : (i + 1) * self.per]))
+        ids = list(range(self.n))
+        self.send_step(ids, actions)
+        return self.recv_step(ids)
+
+    def send_step(self, ids: list[int], actions: np.ndarray) -> None:
+        for k, i in enumerate(ids):
+            self.remotes[i].send(("step", actions[k * self.per : (k + 1) * self.per]))
+
+    def recv_step(self, ids: list[int]) -> tuple[list, int]:
         results, restarts = [], 0
-        for i, r in enumerate(self.remotes):
+        for i in ids:
+            r = self.remotes[i]
             try:
                 out = r.recv()
                 if isinstance(out, tuple) and out and out[0] == "error":
@@ -239,6 +306,9 @@ def main(argv=None) -> None:
     p.add_argument("--save-every", type=int, default=10)
     p.add_argument("--slots", action="store_true", help="enable the landmark slot memory read path")
     p.add_argument("--target-entropy", type=float, default=0.0, help="adapt the entropy coefficient to hold this policy entropy (0 = fixed --ent)")
+    p.add_argument("--eval-every", type=int, default=200, help="score a snapshot on validation levels every N updates in the background (0 = off)")
+    p.add_argument("--eval-procs", type=int, default=3)
+    p.add_argument("--eval-per-tier", type=int, default=10)
     args = p.parse_args(argv)
 
     torch.set_num_threads(1)
@@ -250,6 +320,8 @@ def main(argv=None) -> None:
     from torch.utils.tensorboard import SummaryWriter
 
     writer = SummaryWriter(str(run_dir / "tb"))
+    writer.add_custom_scalars(LAYOUT)
+    writer.add_text("guide", GUIDE, 0)
 
     net = DoomNet(slots=args.slots).to(device)
     (run_dir / "config.json").write_text(json.dumps({"slots": args.slots, "hidden": net.hidden}))
@@ -280,10 +352,19 @@ def main(argv=None) -> None:
     map_dir = tempfile.mkdtemp(prefix=f"doomai_{args.run}_")
     workers = Workers(args.workers, args.envs_per_worker, difficulty, weights, args.seed * 1000, map_dir)
     B, T = args.workers * args.envs_per_worker, args.rollout
-    obs = workers.reset()
-    h = net.initial_state(B, device)
-    prev_action = np.zeros((B, 9), np.float32)
-    use_cd = np.zeros(B, np.int64)
+    obs_all = workers.reset()
+    half = args.workers // 2 if args.workers > 1 else args.workers
+    group_workers = [list(range(half)), list(range(half, args.workers))] if half < args.workers else [list(range(args.workers))]
+    groups = []
+    for ids in group_workers:
+        lo, hi = ids[0] * args.envs_per_worker, (ids[-1] + 1) * args.envs_per_worker
+        groups.append({
+            "ids": ids, "lo": lo, "hi": hi, "n": hi - lo,
+            "obs": obs_all[lo:hi],
+            "h": net.initial_state(hi - lo, device),
+            "prev": np.zeros((hi - lo, 9), np.float32),
+            "cd": np.zeros(hi - lo, np.int64),
+        })
     ret_acc = np.zeros(B, np.float64)
     disc_ret = np.zeros(B, np.float64)
 
@@ -294,60 +375,80 @@ def main(argv=None) -> None:
     deadline = start + args.hours * 3600
 
     ent_coef = args.ent
+    evaluator = None
     while time.time() < deadline and (not args.max_updates or update < args.max_updates):
         if (run_dir / "STOP").exists():
             print("STOP file found: saving and shutting down", flush=True)
             break
         t0 = time.time()
-        buf = {k: [] for k in ("obs", "prev", "allowed", "choice", "logp", "value", "reward", "done")}
+        keys = ("obs", "prev", "allowed", "choice", "logp", "value", "reward", "done")
+        gbuf = [{k: [] for k in keys} for _ in groups]
         L = args.chunk
         n_chunks = T // L
-        h_chunks = torch.zeros(n_chunks, B, net.hidden, device=device)
+        gh_chunks = [torch.zeros(n_chunks, g["n"], net.hidden, device=device) for g in groups]
         net.eval()
+
+        def act(gi: int, t: int) -> None:
+            g = groups[gi]
+            if t % L == 0:
+                gh_chunks[gi][t // L] = g["h"]
+            x = to_tensors(stack(g["obs"]), device)
+            prev_t = torch.from_numpy(g["prev"]).to(device)
+            allowed = torch.from_numpy((g["cd"] == 0).astype(np.float32)).to(device)
+            logits, value, g["h"] = net(x, prev_t, g["h"], allowed)
+            choice = sample(logits)
+            logp, _ = log_prob_entropy(logits, choice)
+            actions = decode_action(choice.cpu().numpy())
+            workers.send_step(g["ids"], actions)
+            g["actions"] = actions
+            gb = gbuf[gi]
+            for k, v in (("obs", x), ("prev", prev_t), ("allowed", allowed), ("choice", choice), ("logp", logp), ("value", value)):
+                gb[k].append(v)
+
+        def collect(gi: int) -> int:
+            nonlocal ret_acc, disc_ret
+            g = groups[gi]
+            results, restarts = workers.recv_step(g["ids"])
+            lo, hi = g["lo"], g["hi"]
+            rewards = np.array([r[1] for r in results], np.float32)
+            dones = np.array([r[2] for r in results], np.float32)
+            for i, r in enumerate(results):
+                if r[3] is not None:
+                    st = r[3]
+                    st["return"] = ret_acc[lo + i] + rewards[i]
+                    tier_hist[st["tier"]].append(st)
+                    recent.append(st)
+            ret_acc[lo:hi] = (ret_acc[lo:hi] + rewards) * (1.0 - dones)
+            disc_ret[lo:hi] = disc_ret[lo:hi] * args.gamma + rewards
+            ret_norm.update(disc_ret[lo:hi])
+            disc_ret[lo:hi] *= 1.0 - dones
+            gbuf[gi]["reward"].append(torch.from_numpy(rewards).to(device))
+            gbuf[gi]["done"].append(torch.from_numpy(dones).to(device))
+            actions = g["actions"]
+            g["cd"] = np.where(actions[:, 7] == 1, USE_COOLDOWN, np.maximum(g["cd"] - 1, 0))
+            g["cd"] = np.where(dones > 0, 0, g["cd"])
+            g["prev"] = actions.astype(np.float32) * (1.0 - dones)[:, None]
+            g["h"] = g["h"] * torch.from_numpy(1.0 - dones).to(device).unsqueeze(-1)
+            g["obs"] = [r[0] for r in results]
+            return restarts
+
         with torch.no_grad():
             for t in range(T):
-                if t % L == 0:
-                    h_chunks[t // L] = h
-                x = to_tensors(stack(obs), device)
-                prev_t = torch.from_numpy(prev_action).to(device)
-                allowed = torch.from_numpy((use_cd == 0).astype(np.float32)).to(device)
-                logits, value, h = net(x, prev_t, h, allowed)
-                choice = sample(logits)
-                logp, _ = log_prob_entropy(logits, choice)
-                choice_np = choice.cpu().numpy()
-                actions = decode_action(choice_np)
-                results, restarts = workers.step(actions)
-                restarts_total += restarts
-                next_obs = [r[0] for r in results]
-                rewards = np.array([r[1] for r in results], np.float32)
-                dones = np.array([r[2] for r in results], np.float32)
-                for i, r in enumerate(results):
-                    if r[3] is not None:
-                        s = r[3]
-                        s["return"] = ret_acc[i] + rewards[i]
-                        tier_hist[s["tier"]].append(s)
-                        recent.append(s)
-                ret_acc = (ret_acc + rewards) * (1.0 - dones)
-                disc_ret = disc_ret * args.gamma + rewards
-                ret_norm.update(disc_ret)
-                disc_ret *= 1.0 - dones
-                buf["obs"].append(x)
-                buf["prev"].append(prev_t)
-                buf["allowed"].append(allowed)
-                buf["choice"].append(choice)
-                buf["logp"].append(logp)
-                buf["value"].append(value)
-                buf["reward"].append(torch.from_numpy(rewards).to(device))
-                buf["done"].append(torch.from_numpy(dones).to(device))
-                use_cd = np.where(actions[:, 7] == 1, USE_COOLDOWN, np.maximum(use_cd - 1, 0))
-                prev_action = actions.astype(np.float32)
-                done_mask = torch.from_numpy(1.0 - dones).to(device).unsqueeze(-1)
-                h = h * done_mask
-                prev_action *= (1.0 - dones)[:, None]
-                use_cd = np.where(dones > 0, 0, use_cd)
-                obs = next_obs
-            x = to_tensors(stack(obs), device)
-            _, last_value, _ = net(x, torch.from_numpy(prev_action).to(device), h, torch.from_numpy((use_cd == 0).astype(np.float32)).to(device))
+                for gi in range(len(groups)):
+                    if t > 0:
+                        restarts_total += collect(gi)
+                    act(gi, t)
+            last_values = []
+            for gi, g in enumerate(groups):
+                restarts_total += collect(gi)
+                x = to_tensors(stack(g["obs"]), device)
+                allowed = torch.from_numpy((g["cd"] == 0).astype(np.float32)).to(device)
+                _, lv, _ = net(x, torch.from_numpy(g["prev"]).to(device), g["h"], allowed)
+                last_values.append(lv)
+            last_value = torch.cat(last_values)
+
+        buf = {k: [torch.cat([gb[k][t] for gb in gbuf], dim=0) if k != "obs" else {kk: torch.cat([gb[k][t][kk] for gb in gbuf], dim=0) for kk in gbuf[0][k][t]} for t in range(T)] for k in keys}
+        h_chunks = torch.cat(gh_chunks, dim=1)
 
         rewards = torch.stack(buf["reward"]) / ret_norm.std
         values = torch.stack(buf["value"])
@@ -443,6 +544,11 @@ def main(argv=None) -> None:
                 w.add_scalar(f"ppo/{k}", float(np.mean(v)), update)
         w.add_scalar("ppo/explained_variance", ev, update)
         w.add_scalar("ppo/entropy_coef", ent_coef, update)
+        w.add_scalar("ref/kl_low", KL_BAND[0], update)
+        w.add_scalar("ref/kl_high", KL_BAND[1], update)
+        w.add_scalar("ref/ev_low", 0.5, update)
+        if args.target_entropy > 0:
+            w.add_scalar("ref/entropy_target", args.target_entropy, update)
         w.add_scalar("ppo/return_std", ret_norm.std, update)
         w.add_scalar("health/worker_restarts", restarts_total, update)
         for tier in range(1, TIER_COUNT + 1):
@@ -452,6 +558,7 @@ def main(argv=None) -> None:
             if hist:
                 for key in ("exit", "dead", "kills", "sectors", "keys", "doors_opened", "steps", "return"):
                     w.add_scalar(f"tier{tier}/{key}", float(np.mean([s[key] for s in hist])), update)
+                w.add_scalar(f"tier{tier}/time_used", float(np.mean([s["steps"] / max(1.0, s.get("cap", s["steps"])) for s in hist])), update)
         if recent:
             for key in recent[-1]["terms"]:
                 w.add_scalar(f"reward_terms/{key}", float(np.mean([s["terms"].get(key, 0.0) for s in recent])), update)
@@ -479,6 +586,26 @@ def main(argv=None) -> None:
             save_atomic(ck, run_dir / "latest.pt")
             if update % (args.save_every * 10) == 0:
                 save_atomic(net.state_dict(), run_dir / f"model_u{update}.pt")
+        if args.eval_every and update % args.eval_every == 0 and evaluator is None:
+            snap = run_dir / f"model_u{update}.pt"
+            if not snap.exists():
+                save_atomic(net.state_dict(), snap)
+            out = run_dir / f"eval_u{update}.json"
+            evaluator = (update, out, subprocess.Popen(
+                ["nice", "-n", "10", sys.executable, "-m", "doomai.evaluate", "--weights", str(snap), "--split", "val",
+                 "--per-tier", str(args.eval_per_tier), "--procs", str(args.eval_procs), "--out", str(out)],
+                cwd=str(REPO), env=dict(os.environ, PYTHONPATH=str(REPO / "training")),
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
+        if evaluator is not None and evaluator[2].poll() is not None:
+            ev_update, ev_out, _ = evaluator
+            evaluator = None
+            if ev_out.exists():
+                summary = json.loads(ev_out.read_text())["summary"]
+                w.add_scalar("eval/score", summary["score"], ev_update)
+                for tier in range(1, TIER_COUNT + 1):
+                    if f"tier{tier}" in summary:
+                        w.add_scalar(f"eval/tier{tier}_exit", summary[f"tier{tier}"]["exit"], ev_update)
+                print(f"validation score at update {ev_update}: {summary['score']}", flush=True)
 
     ck = {
         "model": net.state_dict(),
