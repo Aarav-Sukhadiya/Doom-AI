@@ -9,7 +9,9 @@ the last two spec tests, so one lucky result cannot switch stages.
     Stage 1, rooms and keycards   weights 0.5 / 1.5 / 1.5 / 0.5   until tiers 2 and 3 both reach the exit 80%
     Stage 2, combat               weights 1.5 / 0.75 / 0.75 / 0.5 until tier 1 reaches 70% exits and at most 25% deaths
     Stage 3, the gauntlet         weights 1 / 1 / 1 / 1.5          everything learned, put to work on tier 4
-If tier 2 or 3 falls below 70% in a later stage, it goes back to stage 1. Tier 4 always keeps at least
+If tier 2 or 3 falls below 70% in a later stage, it goes back to stage 1.
+    Stage 4, combat and gauntlet  weights 1.25 / 1 / 1 / 1.25     chosen by hand (--stage 4); goes back to
+                                                                   stage 1 only if tier 2 or 3 falls below 60% Tier 4 always keeps at least
 half weight so it is not forgotten. Stop it with: touch runs/<run>/NOFOCUS
 """
 
@@ -26,6 +28,7 @@ STAGES = {
     1: ([0.5, 1.5, 1.5, 0.5], "stage 1: rooms and keycards until tiers 2 and 3 reach 80% exits"),
     2: ([1.5, 0.75, 0.75, 0.5], "stage 2: combat until tier 1 reaches 70% exits and at most 25% deaths"),
     3: ([1.0, 1.0, 1.0, 1.5], "stage 3: the gauntlet, tier 4 with everything learned"),
+    4: ([1.25, 1.0, 1.0, 1.25], "stage 4: more combat and gauntlet, rooms and keycards kept at their usual share"),
 }
 
 
@@ -39,6 +42,8 @@ def decide(stage: int, recent: list[dict]) -> int:
 
     t1_exit, t1_died = mean(1, "exit_rate"), mean(1, "died")
     t2, t3 = mean(2, "exit_rate"), mean(3, "exit_rate")
+    if stage == 4:
+        return 1 if (t2 < 0.6 or t3 < 0.6) else 4
     if stage > 1 and (t2 < 0.7 or t3 < 0.7):
         return 1
     if stage == 1 and t2 >= 0.8 and t3 >= 0.8:
