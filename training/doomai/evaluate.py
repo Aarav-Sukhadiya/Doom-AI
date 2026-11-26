@@ -22,6 +22,19 @@ import numpy as np
 
 REPO = Path(__file__).resolve().parents[2]
 TIERS = (1, 2, 3, 4)
+TIER_WEIGHT = {0: 1.0, 1: 1.0, 2: 2.0, 3: 3.0, 4: 4.0}
+
+
+def episode_score(r: dict) -> float:
+    """Proxy for the official categories: exit largest, then progression, exploration, combat."""
+    return (
+        10.0 * r["exit"]
+        + 2.0 * r["keys"]
+        + 1.0 * r["doors_opened"]
+        + 0.3 * r["sectors"]
+        + 0.5 * r["kills"]
+        - 2.0 * r["dead"]
+    )
 
 
 def _load_agent(weights: str, greedy: bool):
@@ -85,6 +98,8 @@ def evaluate(weights: str, split: str = "val", per_tier: int = 20, tiers=TIERS, 
     with mp.get_context("forkserver").Pool(procs) as pool:
         results = pool.map(_run, jobs, chunksize=1)
     summary = {}
+    weighted = sum(TIER_WEIGHT[r["tier"]] * episode_score(r) for r in results)
+    summary["score"] = round(weighted / sum(TIER_WEIGHT[r["tier"]] for r in results), 3)
     for t in sorted({r["tier"] for r in results}):
         rs = [r for r in results if r["tier"] == t]
         summary[f"tier{t}" if t else "two_rooms"] = {
