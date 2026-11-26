@@ -1,6 +1,6 @@
 {
-  "slots": false,
+  "slots": true,
   "hidden": 256,
   "greedy": false,
-  "source": "runs/cp7c/model.pt"
+  "source": "runs/main3/model_u400.pt"
 }
