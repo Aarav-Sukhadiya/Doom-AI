@@ -5,7 +5,7 @@ batches every environment's decision on the GPU, keeps the GRU state, and trains
 Levels come from the procedural generator; each tier's difficulty rises on its own as the agent's
 exit rate on that tier improves.
 
-    python -m doomai.ppo --run v1 --tiers 1 2 3 --hours 2
+    python -m doomai.train --run v1 --tiers 1 2 3 --hours 2   (doomai.train keeps worker processes small)
 
 Stop a run cleanly (checkpoint saved, every game closed) with: touch runs/<run>/STOP
 """
@@ -65,7 +65,7 @@ Open the **CUSTOM SCALARS** tab. Panels, top to bottom:
 
 LAYOUT = {
     "1 Is it winning?": {
-        "Validation score on fixed unseen levels (higher is better)": ["Multiline", [r"eval/score"]],
+        "Validation score on fixed unseen levels (higher is better)": ["Multiline", [r"eval/score", r"ref/shipped_score"]],
         "Validation exit rate per tier (unseen, full difficulty)": ["Multiline", [r"eval/tier\d_exit"]],
         "Practice exit rate per tier (higher is better)": ["Multiline", [r"tier\d/exit"]],
         "Practice difficulty per tier (rises as it improves, goal 1.0)": ["Multiline", [r"curriculum/difficulty_t\d"]],
@@ -225,6 +225,7 @@ def main(argv=None) -> None:
     p.add_argument("--eval-every", type=int, default=200, help="score a snapshot on validation levels every N updates in the background (0 = off)")
     p.add_argument("--eval-procs", type=int, default=3)
     p.add_argument("--eval-per-tier", type=int, default=10)
+    p.add_argument("--shipped-score", type=float, default=0.0, help="validation score of the shipped agent, drawn as a reference line")
     args = p.parse_args(argv)
 
     torch.set_num_threads(1)
@@ -520,6 +521,8 @@ def main(argv=None) -> None:
             if ev_out.exists():
                 summary = json.loads(ev_out.read_text())["summary"]
                 w.add_scalar("eval/score", summary["score"], ev_update)
+                if args.shipped_score:
+                    w.add_scalar("ref/shipped_score", args.shipped_score, ev_update)
                 for tier in range(1, TIER_COUNT + 1):
                     if f"tier{tier}" in summary:
                         w.add_scalar(f"eval/tier{tier}_exit", summary[f"tier{tier}"]["exit"], ev_update)
