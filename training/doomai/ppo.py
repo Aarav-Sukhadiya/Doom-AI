@@ -99,9 +99,9 @@ LAYOUT = {
 
 
 class Workers:
-    def __init__(self, n: int, per: int, difficulty, weights, seed: int, map_dir: str, reward: dict | None = None, hard_share: float = 0.0):
+    def __init__(self, n: int, per: int, difficulty, weights, seed: int, map_dir: str, reward: dict | None = None, hard_share: float = 0.0, freedoom_share: float = 0.0):
         self.n, self.per = n, per
-        self.reward, self.hard_share = reward, hard_share
+        self.reward, self.hard_share, self.freedoom_share = reward, hard_share, freedoom_share
         self.difficulty, self.weights, self.seed, self.map_dir = difficulty, weights, seed, map_dir
         self.ctx = mp.get_context("forkserver")
         self.ctx.set_forkserver_preload(["doomai.worker"])
@@ -111,7 +111,7 @@ class Workers:
 
     def _start(self, i: int, seed: int) -> None:
         parent, child = self.ctx.Pipe()
-        p = self.ctx.Process(target=worker_main, args=(child, i, self.per, self.difficulty, self.weights, seed, self.map_dir, self.reward, self.hard_share), daemon=True)
+        p = self.ctx.Process(target=worker_main, args=(child, i, self.per, self.difficulty, self.weights, seed, self.map_dir, self.reward, self.hard_share, self.freedoom_share), daemon=True)
         p.start()
         child.close()
         self.remotes[i], self.procs[i] = parent, p
@@ -244,6 +244,8 @@ def main(argv=None) -> None:
     p.add_argument("--raise-at", type=float, default=0.6, help="raise a tier's difficulty when its rolling exit rate passes this")
     p.add_argument("--hard-share", type=float, default=0.0, help="share of practice levels generated at full difficulty")
     p.add_argument("--fire-mask", action="store_true", help="block ATTACK when no enemy is in view (action mask from observation fields)")
+    p.add_argument("--freedoom-share", type=float, default=0.0, help="share of practice episodes on real Freedoom 2 levels MAP01-MAP20 (logged as tier5)")
+    p.add_argument("--eval-freedoom", action="store_true", help="background validation also plays held-out Freedoom 2 MAP21-MAP32")
     args = p.parse_args(argv)
 
     torch.set_num_threads(1)
@@ -297,7 +299,7 @@ def main(argv=None) -> None:
     for stale in Path(map_dir).glob("*.wad"):
         stale.unlink(missing_ok=True)
     workers = Workers(args.workers, args.envs_per_worker, difficulty, weights, args.seed * 1000, map_dir,
-                      reward={"subgoal": args.subgoal}, hard_share=args.hard_share)
+                      reward={"subgoal": args.subgoal}, hard_share=args.hard_share, freedoom_share=args.freedoom_share)
     B, T = args.workers * args.envs_per_worker, args.rollout
     obs_all = workers.reset()
     half = args.workers // 2 if args.workers > 1 else args.workers
@@ -315,7 +317,7 @@ def main(argv=None) -> None:
     ret_acc = np.zeros(B, np.float64)
     disc_ret = np.zeros(B, np.float64)
 
-    tier_hist = {t: deque(maxlen=100) for t in range(1, TIER_COUNT + 1)}
+    tier_hist = {t: deque(maxlen=100) for t in range(1, TIER_COUNT + 2)}
     recent = deque(maxlen=200)
     skipped, restarts_total = 0, 0
     start = time.time()
@@ -498,9 +500,9 @@ def main(argv=None) -> None:
             w.add_scalar("ref/entropy_target", args.target_entropy, update)
         w.add_scalar("ppo/return_std", ret_norm.std, update)
         w.add_scalar("health/worker_restarts", restarts_total, update)
-        for tier in range(1, TIER_COUNT + 1):
+        for tier in range(1, TIER_COUNT + 2):
             hist = list(tier_hist[tier])
-            if weights[tier - 1] > 0:
+            if tier <= TIER_COUNT and weights[tier - 1] > 0:
                 w.add_scalar(f"curriculum/difficulty_t{tier}", difficulty[tier - 1], update)
             if hist:
                 for key in ("exit", "dead", "kills", "sectors", "keys", "doors_opened", "steps", "return"):
@@ -512,8 +514,9 @@ def main(argv=None) -> None:
 
         if update % 5 == 0 or update == 1:
             line = " ".join(
-                f"t{t}:exit={np.mean([s['exit'] for s in tier_hist[t]]):.2f}/d={difficulty[t-1]:.1f}"
-                for t in args.tiers if tier_hist[t]
+                (f"t{t}:exit={np.mean([s['exit'] for s in tier_hist[t]]):.2f}/d={difficulty[t-1]:.1f}" if t <= TIER_COUNT
+                 else f"freedoom:exit={np.mean([s['exit'] for s in tier_hist[t]]):.2f}/areas={np.mean([s['sectors'] for s in tier_hist[t]]):.0f}")
+                for t in list(args.tiers) + ([TIER_COUNT + 1] if args.freedoom_share > 0 else []) if tier_hist[t]
             )
             print(
                 f"[{elapsed/60:6.1f} min] update {update} steps {total_steps} {sps:5.0f}/s "
@@ -540,7 +543,8 @@ def main(argv=None) -> None:
             out = run_dir / f"eval_u{update}.json"
             evaluator = (update, out, subprocess.Popen(
                 ["nice", "-n", "10", sys.executable, "-m", "doomai.evaluate", "--weights", str(snap), "--split", "val",
-                 "--per-tier", str(args.eval_per_tier), "--procs", str(args.eval_procs), "--out", str(out)],
+                 "--per-tier", str(args.eval_per_tier), "--procs", str(args.eval_procs), "--out", str(out)]
+                + (["--freedoom-maps", "21", "32"] if args.eval_freedoom else []),
                 cwd=str(REPO), env=dict(os.environ, PYTHONPATH=str(REPO / "training")),
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
         if evaluator is not None and evaluator[2].poll() is not None:
@@ -554,6 +558,9 @@ def main(argv=None) -> None:
                 for tier in range(1, TIER_COUNT + 1):
                     if f"tier{tier}" in summary:
                         w.add_scalar(f"eval/tier{tier}_exit", summary[f"tier{tier}"]["exit"], ev_update)
+                if "freedoom2" in summary:
+                    for key in ("exit", "dead", "kills", "sectors", "doors_opened"):
+                        w.add_scalar(f"eval/freedoom_{key}", summary["freedoom2"][key], ev_update)
                 print(f"validation score at update {ev_update}: {summary['score']}", flush=True)
 
     ck = {

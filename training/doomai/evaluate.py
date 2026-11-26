@@ -93,7 +93,7 @@ def _run(job):
     return dict(info["episode_stats"], tier=tier, seed=seed, map=map_name if wad else None, terms=info["episode_terms"])
 
 
-def evaluate(weights: str, split: str = "val", per_tier: int = 20, tiers=TIERS, greedy: bool = False, procs: int = 12, freedoom: int = 0):
+def evaluate(weights: str, split: str = "val", per_tier: int = 20, tiers=TIERS, greedy: bool = False, procs: int = 12, freedoom: int = 0, freedoom_maps=None):
     from doomai.maps.generate import seeds_for
 
     jobs = [(t, s, weights, greedy, None) for t in tiers for s in seeds_for(split, per_tier, start=10_000 * t)]
@@ -103,6 +103,11 @@ def evaluate(weights: str, split: str = "val", per_tier: int = 20, tiers=TIERS, 
 
         iwad = str(Path(vizdoom.__file__).parent / "freedoom2.wad")
         jobs += [(9, k, weights, greedy, iwad, f"MAP{k:02d}") for k in range(1, freedoom + 1)]
+    if freedoom_maps:
+        import vizdoom
+
+        iwad = str(Path(vizdoom.__file__).parent / "freedoom2.wad")
+        jobs += [(9, k, weights, greedy, iwad, f"MAP{k:02d}") for k in range(freedoom_maps[0], freedoom_maps[1] + 1)]
     with mp.get_context("forkserver").Pool(procs) as pool:
         results = pool.map(_run, jobs, chunksize=1)
     summary = {}
@@ -126,8 +131,9 @@ def main() -> None:
     p.add_argument("--procs", type=int, default=12)
     p.add_argument("--out", default="")
     p.add_argument("--freedoom", type=int, default=0, help="also play Freedoom 2 MAP01..MAPnn (reported separately, weight 0 in the score)")
+    p.add_argument("--freedoom-maps", type=int, nargs=2, default=None, metavar=("FIRST", "LAST"), help="also play Freedoom 2 MAPfirst..MAPlast")
     args = p.parse_args()
-    summary, results = evaluate(args.weights, args.split, args.per_tier, args.tiers, args.greedy, args.procs, args.freedoom)
+    summary, results = evaluate(args.weights, args.split, args.per_tier, args.tiers, args.greedy, args.procs, args.freedoom, args.freedoom_maps)
     print(json.dumps(summary, indent=2))
     if args.out:
         Path(args.out).write_text(json.dumps({"summary": summary, "episodes": results}, indent=2))

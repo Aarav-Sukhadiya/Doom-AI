@@ -22,9 +22,12 @@ from doomobs import observe  # noqa: E402
 from landmarks import LandmarkTracker  # noqa: E402
 
 TIER_COUNT = 4
+FREEDOOM_TIER = 5
+FREEDOOM_TRAIN_MAPS = 20
+FREEDOOM_TICKS = 4200
 
 
-def worker_main(remote, worker_id: int, envs_per_worker: int, difficulty, weights, seed: int, map_dir: str, reward_cfg: dict | None = None, hard_share: float = 0.0):
+def worker_main(remote, worker_id: int, envs_per_worker: int, difficulty, weights, seed: int, map_dir: str, reward_cfg: dict | None = None, hard_share: float = 0.0, freedoom_share: float = 0.0):
     from doomai.envs.shaped import ShapedDoomEnv
     from doomai.maps.generate import generate, seeds_for
     from doomai.maps.grid import write_grid_wad
@@ -41,7 +44,16 @@ def worker_main(remote, worker_id: int, envs_per_worker: int, difficulty, weight
     counter = [0]
     builder = ThreadPoolExecutor(max_workers=1)
 
+    freedoom_iwad = None
+    if freedoom_share > 0:
+        import vizdoom
+
+        freedoom_iwad = str(Path(vizdoom.__file__).parent / "freedoom2.wad")
+
     def build(i):
+        if freedoom_iwad and build_rng.random() < freedoom_share:
+            map_name = f"MAP{int(build_rng.integers(1, FREEDOOM_TRAIN_MAPS + 1)):02d}"
+            return ShapedDoomEnv(freedoom_iwad, map_name, episode_ticks=FREEDOOM_TICKS, reward=reward_cfg), FREEDOOM_TIER
         w = np.array(weights[:], np.float64)
         tier = int(build_rng.choice(TIER_COUNT, p=w / w.sum())) + 1
         if build_rng.random() < hard_share:
@@ -61,9 +73,10 @@ def worker_main(remote, worker_id: int, envs_per_worker: int, difficulty, weight
         env, tier = pending[i].result()
         pending[i] = builder.submit(build, i)
         if envs[i] is not None:
-            old = Path(envs[i].wad)
+            old = Path(envs[i].wad).resolve()
             envs[i].close()
-            old.unlink(missing_ok=True)
+            if old.parent == Path(map_dir).resolve():
+                old.unlink(missing_ok=True)
         envs[i] = env
         tiers[i] = tier
         plays[i] = 0
