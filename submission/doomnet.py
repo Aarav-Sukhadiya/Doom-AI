@@ -134,12 +134,28 @@ class DoomNet(nn.Module):
         v = self.vit_fc(torch.cat([x["vitals"], prev_action], dim=-1))
         return self.trunk(torch.cat([img, r, torch.cat([e_mean, e_max], -1), v], dim=-1))
 
+    def heads(self, h: torch.Tensor, use_allowed: torch.Tensor):
+        return mask_use(self.policy(h), use_allowed), self.value(h).squeeze(-1)
+
     def forward(self, x, prev_action, h, use_allowed):
         """One step: returns per-head logits (B, 13), value (B,), next hidden (B, H)."""
         h = self.gru(self.encode(x, prev_action), h)
-        logits = self.policy(h)
-        logits = mask_use(logits, use_allowed)
-        return logits, self.value(h).squeeze(-1), h
+        logits, value = self.heads(h, use_allowed)
+        return logits, value, h
+
+    def forward_sequence(self, x, prev_action, h, use_allowed, dones):
+        """L steps for N sequences at once. x tensors are (L, N, ...); dones (L, N) reset h after step t."""
+        L, N = dones.shape
+        flat = {k: v.reshape(L * N, *v.shape[2:]) for k, v in x.items()}
+        feats = self.encode(flat, prev_action.reshape(L * N, -1)).reshape(L, N, -1)
+        hs = []
+        for t in range(L):
+            h = self.gru(feats[t], h)
+            hs.append(h)
+            h = h * (1.0 - dones[t]).unsqueeze(-1)
+        hs = torch.stack(hs).reshape(L * N, -1)
+        logits, value = self.heads(hs, use_allowed.reshape(L * N))
+        return logits, value
 
 
 def mask_use(logits: torch.Tensor, use_allowed: torch.Tensor) -> torch.Tensor:
@@ -157,14 +173,18 @@ def split_logits(logits: torch.Tensor) -> list[torch.Tensor]:
 def sample(logits: torch.Tensor, greedy: bool = False) -> torch.Tensor:
     choices = []
     for part in split_logits(logits):
-        choices.append(part.argmax(-1) if greedy else torch.distributions.Categorical(logits=part).sample())
+        if not greedy:
+            u = torch.rand_like(part).clamp_(1e-9, 1.0 - 1e-9)
+            part = part - torch.log(-torch.log(u))
+        choices.append(part.argmax(-1))
     return torch.stack(choices, dim=-1)
 
 
 def log_prob_entropy(logits: torch.Tensor, choice: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-    lp, ent = 0.0, 0.0
+    lp = torch.zeros(logits.shape[0], device=logits.device)
+    ent = torch.zeros(logits.shape[0], device=logits.device)
     for i, part in enumerate(split_logits(logits)):
-        dist = torch.distributions.Categorical(logits=part)
-        lp = lp + dist.log_prob(choice[:, i])
-        ent = ent + dist.entropy()
+        logp = torch.log_softmax(part, dim=-1)
+        lp = lp + logp.gather(-1, choice[:, i : i + 1]).squeeze(-1)
+        ent = ent - (logp.exp() * logp).sum(-1)
     return lp, ent
