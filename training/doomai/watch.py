@@ -63,7 +63,7 @@ def play(agent, wad: str, map_name: str, ticks: int, lmp: Path, seed: int) -> tu
         st = env.privileged_state()
         terms = info["reward_terms"]
         trace.append({
-            "t": st["tic"] / 35.0,
+            "t": max(st["tic"] / 35.0, trace[-1]["t"] if trace else 0.0),
             "health": float(st["health"]),
             "ammo": float(obs["vitals"][3]),
             "fired": bool(np.asarray(action)[6]),
