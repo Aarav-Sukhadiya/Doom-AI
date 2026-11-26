@@ -4,5 +4,5 @@
   "fire_mask": true,
   "entity_range": 4.0,
   "greedy": false,
-  "source": "runs/main10/model_u200.pt"
+  "source": "runs/main11/model_u200.pt"
 }
