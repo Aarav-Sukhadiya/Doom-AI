@@ -207,7 +207,7 @@ def test_use_on_locked_door_without_key_is_penalised(tmp_path):
 def test_standing_still_with_enemy_in_view_is_penalised(tmp_path):
     results = {}
     for name, grid in (("enemy", "#############\n#....P.....z#\n#...........#\n#############"), ("empty", "#############\n#....P......#\n#...........#\n#############")):
-        env = ShapedDoomEnv(str(write_grid_wad(grid, tmp_path / f"{name}.wad")), "MAP01", episode_ticks=600)
+        env = ShapedDoomEnv(str(write_grid_wad(grid, tmp_path / f"{name}.wad")), "MAP01", episode_ticks=600, reward={"fight_still": -0.01})
         env.reset(seed=0)
         still = 0
         for i in range(16):
@@ -218,3 +218,21 @@ def test_standing_still_with_enemy_in_view_is_penalised(tmp_path):
         env.close()
         results[name] = still
     assert results["enemy"] > 0 and results["empty"] == 0
+
+
+def test_exit_stretch_pull_is_boosted(tmp_path):
+    grid = "#############\n#P..........E#\n#############".replace("..........E#", ".........E#")
+    totals = {}
+    for boost in (1.0, 2.0):
+        env = ShapedDoomEnv(str(write_grid_wad(grid, tmp_path / "m.wad")), "MAP01", episode_ticks=600,
+                            reward={"subgoal": 0.05, "subgoal_exit_boost": boost}, subgoal_grid=grid)
+        env.reset(seed=0)
+        total = 0.0
+        for _ in range(12):
+            _, _, term, trunc, info = env.step(np.array([1, 0, 0, 0, 0, 0, 0, 0, 0], np.int8))
+            total += info["reward_terms"].get("subgoal", 0.0)
+            if term or trunc:
+                break
+        env.close()
+        totals[boost] = total
+    assert totals[1.0] > 0 and abs(totals[2.0] - 2 * totals[1.0]) < 1e-6

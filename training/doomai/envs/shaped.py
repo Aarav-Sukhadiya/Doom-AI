@@ -27,7 +27,7 @@ REWARD = {
     "new_cell_decay": 0.998,
     "kill": 1.0,
     "damage_dealt": 0.005,
-    "damage_taken": -0.015,
+    "damage_taken": -0.01,
     "death": -2.0,
     "death_early": -3.0,
     "ammo_used": -0.02,
@@ -36,10 +36,11 @@ REWARD = {
     "pickup_ammo": 0.01,
     "pickup_weapon": 1.5,
     "futile_use": -0.1,
-    "fight_still": -0.005,
+    "fight_still": 0.0,
     "idle_fire": -0.02,
     "living": -0.001,
     "subgoal": 0.0,
+    "subgoal_exit_boost": 2.0,
 }
 
 DOOR_OPEN_GAP = 56.0
@@ -137,6 +138,7 @@ class ShapedDoomEnv(DoomEnv):
         self.episode_terms = {}
         self.episode_steps = 0
         self._phi = self._potential(st, obs["vitals"])
+        self._stage = (self._subgoals.stage(obs["vitals"], self._opened_locks()) if self._subgoals is not None and self._subgoals.stages else -1)
         return obs, info
 
     def _locked_ahead_without_key(self, st, keys) -> bool:
@@ -229,8 +231,16 @@ class ShapedDoomEnv(DoomEnv):
             terms["new_cell"] = cell_reward
             if self._subgoals is not None:
                 phi = self._potential(st, obs["vitals"])
-                terms["subgoal"] = cfg["subgoal"] * (phi - self._phi)
+                scale = cfg["subgoal"]
+                stage = self._subgoals.stage(obs["vitals"], self._opened_locks()) if self._subgoals.stages else -1
+                last = len(self._subgoals.stages) - 1
+                if stage == last and self._stage == last:
+                    # Final stretch (every key and lock done): pull harder toward the exit, which no
+                    # sensor shows, so it learns to link the exit's look with walking to it.
+                    scale *= cfg["subgoal_exit_boost"]
+                terms["subgoal"] = scale * (phi - self._phi)
                 self._phi = phi
+                self._stage = stage
 
         left = max(0.0, 1.0 - st["tic"] / max(1, st["episode_ticks"]))
         if info["exit_reached"]:

@@ -27,7 +27,7 @@ FREEDOOM_TRAIN_MAPS = 20
 FREEDOOM_TICKS = 4200
 FREEDOOM1_MAPS = [f"E{e}M{m}" for e in range(1, 5) for m in range(1, 10)]
 REAL_MAP_SKILLS = (1, 2, 3)
-REAL_MAP_SKILL_P = (0.25, 0.35, 0.4)
+REAL_MAP_SKILL_P = (0.1, 0.2, 0.7)
 
 
 def worker_main(remote, worker_id: int, envs_per_worker: int, difficulty, weights, seed: int, map_dir: str, reward_cfg: dict | None = None, hard_share: float = 0.0, freedoom_share: float = 0.0, entity_range: float = 1.0, mapping: bool = False):
