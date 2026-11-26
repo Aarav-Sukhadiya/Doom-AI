@@ -4,6 +4,9 @@
   "fire_mask": true,
   "entity_range": 4.0,
   "crumbs": true,
+  "map": true,
+  "weapon": true,
+  "space": true,
   "greedy": false,
-  "source": "runs/main14/model_u200.pt"
+  "source": "runs/main20/model_u200.pt"
 }
