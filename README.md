@@ -47,22 +47,26 @@ carry over to new levels, and that is exactly what the competition tests.
 
 ## 4. Where it stands now
 
-The agent in this repository was trained overnight on a laptop. On levels it has never seen:
+The agent in this repository was trained overnight on a laptop, about 115 million decisions in all. On levels
+it has never seen:
 
-| Test | Result |
-| --- | --- |
-| The organisers' test level (`maps/two_rooms.wad`) | Reaches the exit every time |
-| Combat rooms (tier 1) | Reaches the exit about half the time |
-| Multi-room levels with doors (tier 2) | Reaches the exit about 70% of the time |
-| Keycard levels (tier 3) | Reaches the exit about 70 to 90% of the time |
-| Two-lock gauntlets (tier 4) | Reaches the exit about a quarter of the time; this is the hardest tier and where most remaining points are |
-| Real Freedoom levels it never practised on | Explores and fights, but does not yet reach the exit. These maps are far larger than anything it trained on |
+| Test | Reaches the exit | Dies |
+| --- | --- | --- |
+| The organisers' test level (`maps/two_rooms.wad`) | Every time | Never |
+| Combat rooms (tier 1) | About half the time | 12 to 25% of the time |
+| Multi-room levels with doors (tier 2) | 68 to 80% | Never |
+| Keycard levels (tier 3) | 72 to 75% | Never |
+| Two-lock gauntlets (tier 4) | About a third of the time | About half the time |
+| Real Freedoom levels it never practised on | Not yet | Most of the time |
 
-It has finished each of our three hardest test levels at least once, collecting both keys and opening both locked
-doors on the way.
+Each range covers two separate sets of unseen levels. Real Freedoom maps are far larger than anything it
+practised on; it explores and fights there but does not yet find the exit.
 
-What it still finds hard: losing fights to several enemies at once, finding the exit when the exit is far from
-everything else, and very large real maps.
+It has finished each of our three hardest test levels at least once, collecting both keys and opening both
+locked doors on the way. Over the night its score on our copy of the official test rose from about 40 to 64.
+
+What it still finds hard: several enemies at once, finding an exit that is far from everything else, and very
+large real maps.
 
 ## 5. How we check it
 
@@ -80,7 +84,7 @@ everything else, and very large real maps.
 | Required | Where |
 | --- | --- |
 | Public GitHub repository with the source code, trained weights and the track entry point | This repository. The agent the organisers run is `submission/agent.py`, with its trained network in `submission/weights/` |
-| 2-page project brief (PDF): USP, system architecture, technical approach | [brief/brief.pdf](brief/brief.pdf) (made from `brief/brief.html`) |
+| 2-page project brief (PDF): USP, system architecture, technical approach | [brief/brief.pdf](brief/brief.pdf) |
 
 ## 7. Playing by the rules
 

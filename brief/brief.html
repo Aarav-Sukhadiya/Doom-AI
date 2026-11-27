@@ -105,7 +105,7 @@ trained agent could be extended without forgetting what it already knew.</p>
 <div>
 <h3>Learning</h3>
 <p>Recurrent PPO with GAE, trained from scratch on one laptop (RTX 5070 Laptop GPU, 16 threads): 56 games in
-parallel in lightweight worker processes, about 2,000 decisions per second, about 95 million decisions in total.
+parallel in lightweight worker processes, about 2,000 decisions per second, about 115 million decisions in total.
 Gradients flow through the GRU over 32-step chunks.</p>
 <h3>Practice levels</h3>
 <p>Our level generator writes real DOOM maps from text layouts in the four tiers and proves each one solvable
@@ -133,16 +133,16 @@ may differ from ours, so these are estimates.</p>
 <thead><tr><th>Test</th><th class="n">Exit reached</th><th class="n">Died</th><th>Notes</th></tr></thead>
 <tbody>
 <tr><td>Organisers' test map (two_rooms)</td><td class="n">every run</td><td class="n">0%</td><td>Passes <code>validate.py</code>; 1.2 s of its 21 s compute budget</td></tr>
-<tr><td>Tier 1, combat and survival</td><td class="n">36 to 48%</td><td class="n">24 to 30%</td><td>Fires only at visible enemies, dodges fireballs</td></tr>
-<tr><td>Tier 2, multi-room with doors</td><td class="n">60 to 72%</td><td class="n">0%</td><td>Opens doors and works room to room</td></tr>
-<tr><td>Tier 3, keycards</td><td class="n">70 to 84%</td><td class="n">0%</td><td>Fetches the key, returns to its door</td></tr>
-<tr><td>Tier 4, full gauntlet</td><td class="n">16 to 25%</td><td class="n">45 to 56%</td><td>Has finished each of our 3 hardest levels</td></tr>
-<tr><td>Held-out Freedoom maps</td><td class="n">0%</td><td class="n">75 to 83%</td><td>Explores and fights; far larger than practice maps</td></tr>
+<tr><td>Tier 1, combat and survival</td><td class="n">52 to 55%</td><td class="n">12 to 25%</td><td>Fires only at visible enemies, dodges fireballs</td></tr>
+<tr><td>Tier 2, multi-room with doors</td><td class="n">68 to 80%</td><td class="n">0%</td><td>Opens doors and works room to room</td></tr>
+<tr><td>Tier 3, keycards</td><td class="n">72 to 75%</td><td class="n">0%</td><td>Fetches the key, returns to its door</td></tr>
+<tr><td>Tier 4, full gauntlet</td><td class="n">35 to 36%</td><td class="n">48 to 50%</td><td>Has finished each of our 3 hardest levels</td></tr>
+<tr><td>Held-out Freedoom maps</td><td class="n">0%</td><td class="n">83 to 92%</td><td>Explores and fights; far larger than practice maps</td></tr>
 </tbody>
 </table>
-<p class="small">Ranges cover the submitted agent and the best snapshots of the final run, on 20 to 25 locked
-levels per tier. Over the night, our official-style test score rose from 40 (the agent we had the evening before) to 55 to
-56, and the validation score from 7.0 to 11.4.</p>
+<p class="small">Each range is the submitted agent on two separate held-out sets: 20 validation levels and 25
+locked test levels per tier. Over the night our official-style test score rose from about 40 (the agent we had
+the evening before) to 64, and the validation score from 7.0 to 12.3.</p>
 
 <h2>5. What we learned</h2>
 <ul>
@@ -154,6 +154,9 @@ largest single gain. Penalties for standing still in fights made the policy stea
 score fell, so we removed them and used positive rewards for dodging instead.</li>
 <li><b>One test is not enough.</b> Validation and our official-style test once disagreed for 400 updates; a
 larger test showed keycard skill slipping after we cut its practice share. Shipping now needs both.</li>
+<li><b>Practise the weak tiers, then finish gently.</b> Focusing practice on rooms and keycards, then on combat
+and the gauntlet, and halving the learning rate for the last hours, took the official-style score from 55 to 64
+and doubled tier 4 exits, as better combat and navigation carried over.</li>
 <li><b>Known limits.</b> Several enemies at once, exits far from everything else, and very large real maps.
 More practice time on tier 4 and real maps is the clearest next step.</li>
 </ul>

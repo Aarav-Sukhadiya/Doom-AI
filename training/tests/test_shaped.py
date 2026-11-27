@@ -204,22 +204,6 @@ def test_use_on_locked_door_without_key_is_penalised(tmp_path):
         assert (hits > 0) == expect
 
 
-def test_standing_still_with_enemy_in_view_is_penalised(tmp_path):
-    results = {}
-    for name, grid in (("enemy", "#############\n#....P.....z#\n#...........#\n#############"), ("empty", "#############\n#....P......#\n#...........#\n#############")):
-        env = ShapedDoomEnv(str(write_grid_wad(grid, tmp_path / f"{name}.wad")), "MAP01", episode_ticks=600, reward={"fight_still": -0.01})
-        env.reset(seed=0)
-        still = 0
-        for i in range(16):
-            _, _, term, trunc, info = env.step(NOOP)
-            still += info["reward_terms"]["fight_still"] < 0
-            if term or trunc:
-                break
-        env.close()
-        results[name] = still
-    assert results["enemy"] > 0 and results["empty"] == 0
-
-
 def test_exit_stretch_pull_is_boosted(tmp_path):
     grid = "#############\n#P..........E#\n#############".replace("..........E#", ".........E#")
     totals = {}

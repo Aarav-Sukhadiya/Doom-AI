@@ -55,7 +55,7 @@ Open the **CUSTOM SCALARS** tab. Panels, top to bottom:
 2. **How it plays:** deaths (lower is better), keys and doors (higher), areas explored (higher), and
    *time used*: the share of the time limit each episode takes. Near 1.0 means it runs out of time.
 3. **Is learning healthy?** These should stay inside their bands rather than go up or down:
-   entropy (how random the choices are) near its target; KL (how much one update changes the
+   entropy (how random the choices are) steady, about 0.5 to 0.8; KL (how much one update changes the
    policy) between the two dashed lines; explained variance (how well it predicts its own future
    reward) between 0.5 and 1.
 4. **Where reward comes from:** the exit should be the largest source; if exploring or killing
@@ -79,7 +79,7 @@ LAYOUT = {
         "Enemies killed per episode": ["Multiline", [r"tier\d/kills"]],
     },
     "3 Is learning healthy? (stay inside the bands)": {
-        "Entropy vs target (randomness of choices)": ["Multiline", [r"ppo/ent$", r"ref/entropy_target"]],
+        "Randomness of choices (entropy)": ["Multiline", [r"ppo/ent$"]],
         "KL per update (between the dashed band)": ["Multiline", [r"ppo/kl$", r"ref/kl_(low|high)"]],
         "Explained variance (0.5 to 1 is healthy)": ["Multiline", [r"ppo/explained_variance", r"ref/ev_low"]],
         "Clip fraction (0.05 to 0.3)": ["Multiline", [r"ppo/clipfrac"]],
@@ -297,7 +297,6 @@ def main(argv=None) -> None:
     p.add_argument("--weapon", action="store_true", help="learned next-weapon action head")
     p.add_argument("--space", action="store_true", help="room-around-me input: nearest wall and mean distance in 8 directions")
     p.add_argument("--entity-range", type=float, default=4.0, help="landmark distance cap for entities, in 1024-unit steps (1.0 before main10)")
-    p.add_argument("--target-entropy", type=float, default=0.0, help="adapt the entropy coefficient to hold this policy entropy (0 = fixed --ent)")
     p.add_argument("--eval-every", type=int, default=200, help="score a snapshot on validation levels every N updates in the background (0 = off)")
     p.add_argument("--eval-procs", type=int, default=3)
     p.add_argument("--eval-per-tier", type=int, default=10)
@@ -555,9 +554,6 @@ def main(argv=None) -> None:
 
         update += 1
         total_steps += T * B
-        if args.target_entropy > 0 and stats["ent"]:
-            step = 1.05 if np.mean(stats["ent"]) < args.target_entropy else 1 / 1.05
-            ent_coef = float(np.clip(ent_coef * step, 1e-4, 0.05))
         for tier in args.tiers:
             hist = tier_hist[tier]
             if len(hist) >= 30:
@@ -586,8 +582,6 @@ def main(argv=None) -> None:
         w.add_scalar("ref/kl_low", KL_BAND[0], update)
         w.add_scalar("ref/kl_high", KL_BAND[1], update)
         w.add_scalar("ref/ev_low", 0.5, update)
-        if args.target_entropy > 0:
-            w.add_scalar("ref/entropy_target", args.target_entropy, update)
         w.add_scalar("ppo/return_std", ret_norm.std, update)
         w.add_scalar("health/worker_restarts", restarts_total, update)
         for tier in range(1, TIER_COUNT + 2):

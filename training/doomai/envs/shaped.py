@@ -7,7 +7,6 @@ allow for training-time shaping. Per-term rewards are returned in info["reward_t
 
 from __future__ import annotations
 
-import math
 
 import numpy as np
 import vizdoom as vd
@@ -36,7 +35,6 @@ REWARD = {
     "pickup_ammo": 0.01,
     "pickup_weapon": 1.5,
     "futile_use": -0.1,
-    "fight_still": 0.0,
     "dodge": 0.02,
     "cornered": -0.003,
     "idle_fire": -0.02,
@@ -53,14 +51,12 @@ AMMO_SLICE = slice(S.VITALS_INDEX["ammo_bullets"], S.VITALS_INDEX["ammo_cells"] 
 ENEMY_TYPES = np.array([i for i, t in enumerate(S.ENTITY_TYPES) if t.startswith("enemy")])
 SELECTED_AMMO = S.VITALS_INDEX["selected_weapon_ammo"]
 HEALTH = S.VITALS_INDEX["health"]
-STILL_WINDOW = 8  # decisions (about 1 second)
 PROJECTILE = S.ENTITY_TYPES.index("projectile")
 THREAT_RANGE = 0.5  # entity distance in 1024-unit steps
 VEL_RIGHT = S.VITALS_INDEX["vel_right"]
 STRAFE_SPEED = 8.0  # map units per tic at full sideways speed
 CLOSE_RAY = 128.0 / 1024.0
 BOXED_SHARE = 0.75
-STILL_DISTANCE = 48.0  # map units
 KEY_COLOUR = ("blue", "yellow", "red", "blue", "yellow", "red")  # vitals key_* order: cards then skulls
 LOCK_COLOUR = {1: "red", 2: "blue", 3: "yellow", 4: "red", 5: "blue", 6: "yellow", 129: "red", 130: "blue", 131: "yellow"}
 ARMOR = S.VITALS_INDEX["armor"]
@@ -139,11 +135,9 @@ class ShapedDoomEnv(DoomEnv):
         }
         self.pickups = 0
         self.futile_uses = 0
-        self.still_fighting = 0
         self.dodges = 0
         self.boxed_fighting = 0
         self._threat = self._incoming(obs)
-        self._trail = [(st["x"], st["y"])]
         self._visit(st)
         self._enemy_in_view = self._sees_enemy(obs)
         self._has_ammo = obs["vitals"][SELECTED_AMMO] > 0
@@ -241,11 +235,6 @@ class ShapedDoomEnv(DoomEnv):
         self.futile_uses += int(futile)
         fired_blind = bool(np.asarray(action)[6]) and not self._enemy_in_view and self._has_ammo
         terms["idle_fire"] = cfg["idle_fire"] * float(fired_blind)
-        self._trail = (self._trail + [(st["x"], st["y"])])[-(STILL_WINDOW + 1):]
-        moved = math.hypot(self._trail[-1][0] - self._trail[0][0], self._trail[-1][1] - self._trail[0][1])
-        still = self._enemy_in_view and not st["finished"] and len(self._trail) > STILL_WINDOW and moved < STILL_DISTANCE
-        terms["fight_still"] = cfg["fight_still"] * float(still)
-        self.still_fighting += int(still)
         sideways = min(1.0, abs(float(obs["vitals"][VEL_RIGHT])) / STRAFE_SPEED)
         dodge = sideways if (self._threat and not st["finished"]) else 0.0
         terms["dodge"] = cfg["dodge"] * dodge
@@ -308,7 +297,6 @@ class ShapedDoomEnv(DoomEnv):
                 "steps": float(self.episode_steps),
                 "pickups": float(self.pickups),
                 "futile_uses": float(self.futile_uses),
-                "still_fighting": float(self.still_fighting),
                 "dodges": float(self.dodges),
                 "boxed_fighting": float(self.boxed_fighting),
             }
