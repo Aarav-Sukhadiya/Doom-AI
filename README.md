@@ -2,6 +2,8 @@
 
 **Yugaantar 2026, DevForge, Track 1: "Can It Play DOOM?"**
 
+**Team Screen Breakers:** Aarav Sukhadiya (team leader) and Adit Krishnadas
+
 ## 1. Mission
 
 For decades, "Can it run DOOM?" was the classic test for hardware. This hackathon flips the question: can a
