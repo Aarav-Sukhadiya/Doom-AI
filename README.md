@@ -108,6 +108,13 @@ The checkpoint in this repository was trained overnight on a single laptop (~115
 └── validate.py           # Official pre-submission checker (unchanged)
 ```
 
+### Project brief
+
+The brief is [brief/brief.pdf](brief/brief.pdf). The two pages are shown here as well:
+
+![Project brief, page 1](brief/page-1.png)
+![Project brief, page 2](brief/page-2.png)
+
 For the full technical reference see [ARCHITECTURE.md](ARCHITECTURE.md). AI coding agents should start with
 [AGENTS.md](AGENTS.md).
 
