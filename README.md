@@ -108,6 +108,9 @@ The checkpoint in this repository was trained overnight on a single laptop (~115
 └── validate.py           # Official pre-submission checker (unchanged)
 ```
 
+For the full technical reference see [ARCHITECTURE.md](ARCHITECTURE.md). AI coding agents should start with
+[AGENTS.md](AGENTS.md).
+
 ---
 
 ## Quick Start
