@@ -55,11 +55,11 @@ it has never seen:
 | The organisers' test level (`maps/two_rooms.wad`) | Every time | Never |
 | Combat rooms (tier 1) | About half the time | 12 to 25% of the time |
 | Multi-room levels with doors (tier 2) | 68 to 80% | Never |
-| Keycard levels (tier 3) | 72 to 75% | Never |
+| Keycard levels (tier 3) | 72 to 84% | Never |
 | Two-lock gauntlets (tier 4) | About a third of the time | About half the time |
 | Real Freedoom levels it never practised on | Not yet | Most of the time |
 
-Each range covers two separate sets of unseen levels. Real Freedoom maps are far larger than anything it
+Each range covers three separate sets of unseen levels, the largest with 100 levels per tier. Real Freedoom maps are far larger than anything it
 practised on; it explores and fights there but does not yet find the exit.
 
 It has finished each of our three hardest test levels at least once, collecting both keys and opening both

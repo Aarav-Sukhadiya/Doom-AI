@@ -133,15 +133,15 @@ may differ from ours, so these are estimates.</p>
 <thead><tr><th>Test</th><th class="n">Exit reached</th><th class="n">Died</th><th>Notes</th></tr></thead>
 <tbody>
 <tr><td>Organisers' test map (two_rooms)</td><td class="n">every run</td><td class="n">0%</td><td>Passes <code>validate.py</code>; 1.2 s of its 21 s compute budget</td></tr>
-<tr><td>Tier 1, combat and survival</td><td class="n">52 to 55%</td><td class="n">12 to 25%</td><td>Fires only at visible enemies, dodges fireballs</td></tr>
+<tr><td>Tier 1, combat and survival</td><td class="n">50 to 55%</td><td class="n">12 to 25%</td><td>Fires only at visible enemies, dodges fireballs</td></tr>
 <tr><td>Tier 2, multi-room with doors</td><td class="n">68 to 80%</td><td class="n">0%</td><td>Opens doors and works room to room</td></tr>
-<tr><td>Tier 3, keycards</td><td class="n">72 to 75%</td><td class="n">0%</td><td>Fetches the key, returns to its door</td></tr>
-<tr><td>Tier 4, full gauntlet</td><td class="n">35 to 36%</td><td class="n">48 to 50%</td><td>Has finished each of our 3 hardest levels</td></tr>
+<tr><td>Tier 3, keycards</td><td class="n">72 to 84%</td><td class="n">0%</td><td>Fetches the key, returns to its door</td></tr>
+<tr><td>Tier 4, full gauntlet</td><td class="n">32 to 36%</td><td class="n">48 to 50%</td><td>Has finished each of our 3 hardest levels</td></tr>
 <tr><td>Held-out Freedoom maps</td><td class="n">0%</td><td class="n">83 to 92%</td><td>Explores and fights; far larger than practice maps</td></tr>
 </tbody>
 </table>
-<p class="small">Each range is the submitted agent on two separate held-out sets: 20 validation levels and 25
-locked test levels per tier. Over the night our official-style test score rose from about 40 (the agent we had
+<p class="small">Each range is the submitted agent on three held-out sets: 20 validation levels, 25 locked test
+levels and a final check on 100 locked test levels per tier, where it beat four other candidates (63.7 points). Over the night our official-style test score rose from about 40 (the agent we had
 the evening before) to 64, and the validation score from 7.0 to 12.3.</p>
 
 <h2>5. What we learned</h2>

@@ -17,7 +17,9 @@ here; the network code it shares with training lives in `submission/` and traini
 | `doomai/train.py` | A small launcher for `ppo.py` that keeps the game processes light. |
 | `doomai/evaluate.py` | Plays a snapshot through the real submitted agent class on validation or test levels and scores it. |
 | `doomai/spec_test.py` | Our copy of the organisers' evaluation: locked test levels in four tiers, the official time and compute limits, points in the four scoring categories. |
-| `doomai/autoship.py` | Watches a training run and ships a snapshot to `submission/weights` only when it clearly beats the current one and `validate.py` passes. |
+| `doomai/autoship.py` | Watches a training run and ships a snapshot to `submission/weights` only when it beats the current one on validation and does not fall behind on the spec test, and `validate.py` passes. |
+| `doomai/focus.py` | Shifts practice between tiers while training runs, in stages chosen from spec-test results, and moves back if a tier slips. |
+| `doomai/final_pick.py` | Plays the leading snapshots on 100 locked levels per tier and ranks them, to choose the agent to submit. |
 | `doomai/package.py` | Copies a snapshot and its settings into `submission/weights`. |
 | `doomai/best_attempts.py` | Keeps the best run on each of the hardest levels, with a video, a replay and a written review. |
 | `doomai/watch.py` | Plays one level with the real agent and shows it at normal speed, or saves it as a video with a step-by-step review. |
@@ -30,10 +32,11 @@ here; the network code it shares with training lives in `submission/` and traini
 ```bash
 uv sync --group train
 PYTHONPATH=training uv run python -m doomai.train --run myrun --slots --crumbs --map --weapon --space \
-    --fire-mask --entity-range 4 --tiers 1 2 3 4 --tier-weights 1 1 0.75 1.5 --freedoom-share 0.15 \
+    --fire-mask --entity-range 4 --tiers 1 2 3 4 --tier-weights 1.25 1 1 1.25 --freedoom-share 0.15 \
     --hard-share 0.35 --subgoal 0.05 --hours 6
 PYTHONPATH=training uv run python -m doomai.autoship --run myrun --shipped-score 11.4
 PYTHONPATH=training uv run python -m doomai.spec_test --weights runs/myrun/model_u400.pt
+PYTHONPATH=training uv run python -m doomai.final_pick runs/myrun/model_u400.pt runs/myrun/model_u600.pt
 uv run pytest training/tests
 ```
 
