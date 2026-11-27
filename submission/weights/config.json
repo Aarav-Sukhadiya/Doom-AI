@@ -8,5 +8,5 @@
   "weapon": true,
   "space": true,
   "greedy": false,
-  "source": "runs/main20/model_u3800.pt"
+  "source": "runs/main20/model_u4200.pt"
 }
