@@ -1,124 +1,131 @@
-# Doom-AI: an agent that learns to play DOOM levels it has never seen
+# Doom-AI
 
-**Yugaantar 2026, DevForge, Track 1: "Can It Play DOOM?"**
+**An autonomous agent that learns to play unseen DOOM levels from scratch.**
 
-**Team Screen Breakers:** Aarav Sukhadiya (team leader) and Adit Krishnadas
+> **Yugaantar 2026 · DevForge · Track 1: "Can It Play DOOM?"**  
+> **Team Screen Breakers:** Aarav Sukhadiya (Team Lead) & Adit Krishnadas
 
-## 1. Mission
+---
 
-For decades, "Can it run DOOM?" was the classic test for hardware. This hackathon flips the question: can a
-neural network actually play DOOM?
+## Overview
 
-Most game bots fall apart the moment a wall moves or an enemy shows up somewhere new, because they repeat a fixed
-sequence of button presses. Our goal is an agent that plays levels it has never seen. It should survive fights,
-find its way through rooms joined by doors, pick up keycards, remember which door each key opens, and reach the
-exit.
+For decades, *"Can it run DOOM?"* was the benchmark for hardware. This project flips the question: **can a neural network actually play DOOM?**
 
-Nobody gives the agent a dataset or a map. It learns only by playing, over and over, and finding out what works.
+Conventional game bots break the moment a wall shifts or an enemy spawns in a new spot because they replay memorised button sequences. **Doom-AI** learns generalisable gameplay from scratch—no pre-built maps, no demonstration datasets, and no scripted navigation. Through pure trial and error, the agent learns to survive combat, open doors between rooms, collect keycards, backtrack to the matching locked door, and reach the exit on levels it has never seen before.
 
-## 2. What makes our agent different
+---
 
-**It remembers places, not button sequences.**
+## Key Differentiator: Spatial Memory
 
-A person playing a new DOOM level remembers things like "there was a red locked door back near the start". Once
-they find the red key, they go back to that door. Our agent does the same, with three kinds of memory that it
-builds as it plays:
+**The agent remembers places, not button sequences.**
 
-- **Landmarks.** When it sees something important, such as a locked door, a keycard, a door, health, ammo, armour
-  or a weapon, it notes where that thing was. Later, holding the key, it can head back to the right door.
-- **Breadcrumbs.** It keeps count of where it has already walked, so it can tell old ground from new ground.
-- **A map it draws itself.** Its 64 distance sensors mark open floor, walls and doors as it moves, and it reads
-  that map like a small picture centred on itself.
+A human player exploring a new DOOM level makes mental notes—*"there was a red locked door back near the start"*—and returns once they find the red key. Doom-AI mirrors this behaviour by constructing three forms of spatial memory on the fly:
 
-The game never tells the agent where it is. It works out its own position from its movements, the way you can
-count your steps in a dark room. Everything it decides comes from the trained network; the memories only give it
-better information to decide with.
+- **Landmarks:** Records the locations of key entities as they appear (locked doors, keycards, standard doors, health, ammo, armour, and weapons). Once holding a key, the agent can navigate directly back to the corresponding locked door.
+- **Breadcrumbs:** Tracks visitation density across traversed areas so the agent distinguishes explored corridors from new ground.
+- **Self-Drawn Map:** Projects 64 distance-sensor readings onto an egocentric (agent-centred) local grid marking open floor, walls, and doors, which the network reads like a mini-map.
 
-## 3. How it works, in plain words
+The environment never exposes absolute coordinates. The agent estimates its own position solely through movement history (dead reckoning—like counting steps in a dark room). Every decision is still produced by the trained neural network; these memories simply give the policy structured spatial context.
 
-| Part | What it does | Everyday comparison |
+---
+
+## How It Works
+
+| Component | Role | Everyday Analogy |
 | --- | --- | --- |
-| **Senses** | Each step the agent gets 64 feelers around it that report what they touch (wall, door, locked door, enemy, item), a list of what is in view (enemies, items, keys, incoming fireballs), its health, ammo and keys, and a small picture of the screen. | Walking with your eyes open and your arms out |
-| **Memory** | A short-term memory of what just happened, plus the landmarks, breadcrumbs and self-drawn map above. | Remembering "the red door is behind me, to the left" |
-| **Brain** | A compact neural network turns all of that into button presses: move, strafe, turn, shoot, open doors and switch weapons. | Deciding what to do next |
-| **Learning** | The agent plays millions of practice moves. Reaching the exit earns the most; keys, doors, new rooms, kills and pickups earn smaller amounts; taking damage and dying cost points. Over time it keeps what earns points. | Practising a game until you get good at it |
-| **Practice levels** | We built a level maker that creates endless new layouts in four tiers, from a single combat room to multi-room levels with two locked doors. The agent also practises on 56 real Freedoom levels. | A coach setting harder drills each week |
+| **Perception** | 64 surrounding distance rays (reporting walls, doors, locked doors, enemies, and items), an in-view entity list (enemies, items, keys, incoming projectiles), scalar stats (health, ammo, keys), and a downscaled screen frame. | Walking with your eyes open and arms outstretched |
+| **Memory** | Short-term temporal state combined with the landmark registry, breadcrumb trail, and self-drawn local map. | Remembering *"the red door is behind me, to the left"* |
+| **Policy (Brain)** | A compact neural network mapping perception and memory directly to actions: move, strafe, turn, shoot, open doors, and switch weapons. | Deciding what to do next |
+| **Training** | Reinforcement learning across millions of steps. Reaching the exit yields the largest reward; keys, doors, new rooms, kills, and pickups earn smaller bonuses; damage and death incur penalties. | Practising a game until strong habits stick |
+| **Curriculum** | A custom procedural level generator producing endless layouts across four difficulty tiers—from single combat rooms to two-lock gauntlets—supplemented by 56 real Freedoom levels. | A coach assigning harder drills each week |
 
-Because it practises on so many different levels, it cannot memorise any one of them. It has to learn skills that
-carry over to new levels, and that is exactly what the competition tests.
+Because the agent trains across thousands of procedurally generated layouts, memorising individual maps is impossible. It is forced to learn transferable skills—precisely what the competition evaluates.
 
-## 4. Where it stands now
+---
 
-The agent in this repository was trained overnight on a laptop, about 115 million decisions in all. On levels
-it has never seen:
+## Benchmarks
 
-| Test | Reaches the exit | Dies |
-| --- | --- | --- |
-| The organisers' test level (`maps/two_rooms.wad`) | Every time | Never |
-| Combat rooms (tier 1) | About half the time | 12 to 25% of the time |
-| Multi-room levels with doors (tier 2) | 68 to 80% | Never |
-| Keycard levels (tier 3) | 72 to 84% | Never |
-| Two-lock gauntlets (tier 4) | About a third of the time | About half the time |
-| Real Freedoom levels it never practised on | Not yet | Most of the time |
+The checkpoint in this repository was trained overnight on a single laptop (~115 million decisions). Results below are measured strictly on **unseen levels** across three independent evaluation suites (up to 100 levels per tier):
 
-Each range covers three separate sets of unseen levels, the largest with 100 levels per tier. Real Freedoom maps are far larger than anything it
-practised on; it explores and fights there but does not yet find the exit.
+| Evaluation Suite | Reaches Exit | Death Rate |
+| --- | :---: | :---: |
+| Organisers' test level (`maps/two_rooms.wad`) | 100% | 0% |
+| Tier 1 — Combat rooms | ~50% | 12–25% |
+| Tier 2 — Multi-room with doors | 68–80% | 0% |
+| Tier 3 — Single keycard levels | 72–84% | 0% |
+| Tier 4 — Two-lock gauntlets | ~33% | ~50% |
+| Unseen real Freedoom levels | 0% *(not yet)* | Most runs |
 
-It has finished each of our three hardest test levels at least once, collecting both keys and opening both
-locked doors on the way. Over the night its score on our copy of the official test rose from about 40 to 64.
+**Notable progress:**
+- Completed each of our three hardest test levels at least once, collecting both keycards and unlocking both doors en route to the exit.
+- Overnight score on our local mirror of the official test improved from **~40 to 64**.
 
-What it still finds hard: several enemies at once, finding an exit that is far from everything else, and very
-large real maps.
+**Current limitations:**
+- Engaging multiple enemies simultaneously.
+- Locating isolated exits far from the main progression loop.
+- Scaling to full-sized real Freedoom maps (significantly larger than our procedural tiers; the agent explores and fights effectively there, but does not yet reach the exit).
 
-## 5. How we check it
+---
 
-- **Validation levels.** Every 10 to 15 minutes the newest version plays 80 levels it has never trained on. A new
-  version only replaces the one in this repository if it clearly beats it, and only after the organisers'
-  checker passes.
-- **A copy of the official test.** We built a test that follows the organisers' rules as closely as we can: four
-  tiers of locked levels that are never used for training, the same time limits per map and the same compute
-  limits per decision. Points follow the four scoring categories (exit, progression, exploration, combat).
-- **Videos.** We record the agent's best runs on the hardest levels, and we can watch the current agent play at
-  normal speed, level after level.
+## Evaluation Pipeline
 
-## 6. Submission
+- **Continuous Validation:** Every 10–15 minutes during training, candidate checkpoints are tested on 80 held-out unseen levels. Repository weights are promoted only when a checkpoint clearly outperforms the incumbent **and** passes `validate.py`.
+- **Official-Test Mirror:** A local benchmark replicating the competition rules as closely as possible—four tiers of locked levels excluded from training, matching per-map time limits, matching per-decision compute budgets, and scoring across all four official categories (*exit, progression, exploration, combat*).
+- **Playback & Recording:** Best runs on the hardest levels are captured as video, and a live runner replays the current agent continuously at real-time speed.
 
-| Required | Where |
+---
+
+## Competition Compliance
+
+- **Purely Learned Policy:** Every action is generated by the trained neural network—no hand-crafted *"if X, do Y"* heuristics, no pathfinding algorithms, and no auto-aim.
+- **Permitted Action Masks:** Only two observation-derived masks are applied (both allowed under track rules): firing is masked when no enemy is visible, and `USE` enters a brief cooldown after activation so the agent does not accidentally reverse a moving door.
+- **Strict Train/Test Separation:** Custom levels, reward shaping, and curriculum scaling are confined to training. During evaluation, the agent receives only standard player-visible observations through the organisers' unmodified wrapper.
+- **Original Implementation:** All agent architecture, memory modules, level generators, and training pipelines were built during the hackathon and are included in this repository.
+
+---
+
+## Submission Deliverables
+
+| Requirement | Location |
 | --- | --- |
-| Public GitHub repository with the source code, trained weights and the track entry point | This repository. The agent the organisers run is `submission/agent.py`, with its trained network in `submission/weights/` |
-| 2-page project brief (PDF): USP, system architecture, technical approach | [brief/brief.pdf](brief/brief.pdf) |
+| Public repository, trained weights, and track entry point | This repo — entry point: `submission/agent.py` · weights: `submission/weights/` |
+| 2-page project brief (USP, architecture, technical approach) | [brief/brief.pdf](brief/brief.pdf) |
 
-## 7. Playing by the rules
+---
 
-- Every move comes from the trained neural network. There are no hand-written "if you see X, do Y" rules, no
-  path-finding and no auto-aim.
-- The only fixed checks are two simple masks taken from what the agent can see: it cannot fire when no enemy is
-  in view, and it cannot press USE again for a moment after pressing it (pressing USE on a moving door would
-  reverse it). The rules allow masks like these.
-- During practice we can change anything: custom levels, extra reward hints, easier difficulty. During the real
-  test the agent sees only what any player sees, through the organisers' official setup.
-- All design and training code was written during the hackathon and is in this repository.
+## Repository Structure
 
-## 8. Where things are
-
-```
-submission/agent.py      the agent the organisers run
-submission/weights/      the trained network (stored with Git LFS) and its settings
-training/                everything used to build, train and test it (see training/README.md)
-maps/                    the organisers' small test level
-env/, docs/, tests/      the organisers' official game wrapper, rules and tests (unchanged)
-validate.py              the organisers' pre-submission checker (unchanged)
+```text
+.
+├── submission/
+│   ├── agent.py          # Track entry point executed by the organisers
+│   └── weights/          # Trained network weights (Git LFS) and config
+├── training/             # Level generator, training loop, and eval tools (see training/README.md)
+├── maps/                 # Organisers' sample test level
+├── env/                  # Official game wrapper (unchanged)
+├── docs/                 # Official rules, scoring, and technical contract (unchanged)
+├── tests/                # Official test suite (unchanged)
+└── validate.py           # Official pre-submission checker (unchanged)
 ```
 
-## 9. For developers
+---
+
+## Quick Start
 
 ```bash
-uv sync --group train                                  # Python 3.13: ViZDoom, the official wrapper, PyTorch
-uv run pytest                                          # the organisers' tests plus ours
-uv run python validate.py                              # the organisers' submission checks
-PYTHONPATH=training uv run python -m doomai.live       # watch the current agent play, level after level
+# Install dependencies (Python 3.13: ViZDoom, official wrapper, PyTorch)
+uv sync --group train
+
+# Run official and custom test suites
+uv run pytest
+
+# Run the organisers' pre-submission validation checks
+uv run python validate.py
+
+# Watch the current agent play continuously in real time
+PYTHONPATH=training uv run python -m doomai.live
 ```
 
-How training works and how to run it is described in [training/README.md](training/README.md). The official
-rules, scoring and technical contract are in [docs/](docs/). This repository was created from the organisers'
-starter template.
+For training instructions and hyperparameter details, see [training/README.md](training/README.md). For official rules, scoring, and the submission contract, see [docs/](docs/).
+
+*Initialised from the organisers' starter template.*
