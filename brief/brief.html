@@ -4,39 +4,54 @@
 <meta charset="utf-8">
 <title>Doom-AI Project Brief</title>
 <style>
-@page { size: A4; margin: 13mm 14mm 12mm; }
-:root { --ink: #1d2126; --muted: #5b6470; --rule: #d5dae0; --accent: #a3361f; --panel: #f4f5f7; }
+@page { size: A4; margin: 0; }
+:root { --ink: #1b1f24; --muted: #5d6673; --rule: #dfe3e8; --accent: #b23a1f; --accent-soft: #f7ece8; --panel: #f3f5f7; --band: #1d232b; }
 * { box-sizing: border-box; }
-body { margin: 0; color: var(--ink); font: 9.6pt/1.38 "Inter", "Helvetica Neue", Arial, sans-serif; }
-h1 { font-size: 19pt; margin: 0 0 1mm; letter-spacing: -0.01em; }
-.sub { color: var(--muted); margin: 0 0 3.5mm; font-size: 9.4pt; }
-h2 { font-size: 11.2pt; margin: 4mm 0 1.5mm; color: var(--accent); }
-h3 { font-size: 9.8pt; margin: 2.5mm 0 1mm; }
+html, body { margin: 0; }
+body { color: var(--ink); font: 9.3pt/1.4 "Noto Sans", "Liberation Sans", Arial, sans-serif; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+.page { padding: 0 13mm 0; }
+.band { background: var(--band); color: #fff; padding: 9mm 13mm 6.5mm; margin-bottom: 4mm; border-bottom: 3px solid var(--accent); }
+.band h1 { font-size: 20pt; line-height: 1.15; margin: 0 0 2mm; letter-spacing: -0.01em; font-weight: 700; }
+.band .team { font-size: 10pt; margin: 0 0 1.2mm; color: #fff; }
+.band .team b { color: #ffb59f; }
+.band .meta { font-size: 8.4pt; color: #b9c2cd; margin: 0; }
+.band code { color: #e3e8ee; }
+h2 { font-size: 11pt; margin: 4.2mm 0 1.8mm; color: var(--ink); display: flex; align-items: center; gap: 2.2mm; }
+h2 .n { display: inline-flex; align-items: center; justify-content: center; width: 5.6mm; height: 5.6mm; border-radius: 50%; background: var(--accent); color: #fff; font-size: 8.6pt; font-weight: 700; flex: none; }
+h2::after { content: ""; flex: 1; height: 1px; background: var(--rule); margin-left: 1mm; }
+h3 { font-size: 9.6pt; margin: 2.2mm 0 0.8mm; color: var(--accent); }
 p { margin: 0 0 1.8mm; }
 ul { margin: 0 0 1.8mm; padding-left: 4.5mm; }
-li { margin: 0 0 0.8mm; }
-.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 5mm; }
-.usp { background: var(--panel); border-left: 2.5px solid var(--accent); padding: 2.5mm 3.5mm; margin: 1mm 0 2mm; }
-table { border-collapse: collapse; width: 100%; font-size: 8.8pt; margin: 1mm 0 2mm; }
-th, td { text-align: left; padding: 1.1mm 2mm 1.1mm 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
-th { color: var(--muted); font-weight: 600; }
-td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; }
+li { margin: 0 0 1mm; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6mm; }
+.usp { background: var(--accent-soft); border-left: 3px solid var(--accent); padding: 2.8mm 4mm; margin: 1mm 0 2mm; border-radius: 0 2mm 2mm 0; }
+table { border-collapse: collapse; width: 100%; font-size: 8.7pt; margin: 1mm 0 1.5mm; }
+thead th { background: var(--band); color: #fff; font-weight: 600; padding: 1.6mm 2mm; text-align: left; }
+tbody td { padding: 1.4mm 2mm; border-bottom: 1px solid var(--rule); vertical-align: top; }
+tbody tr:nth-child(even) td { background: var(--panel); }
+td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .diagram { width: 100%; margin: 1mm 0 2mm; }
-.diagram text { font: 7.6pt "Inter", Arial, sans-serif; fill: var(--ink); }
-.diagram .t { font-weight: 600; }
-.diagram .m { fill: var(--muted); font-size: 7pt; }
-.small { font-size: 8.4pt; color: var(--muted); }
-.page2 { break-before: page; }
-code { font: 8.4pt "JetBrains Mono", "DejaVu Sans Mono", monospace; }
+.diagram text { font: 7.5pt "Noto Sans", Arial, sans-serif; fill: var(--ink); }
+.diagram .t { font-weight: 700; fill: #fff; }
+.diagram .m { fill: var(--muted); font-size: 6.9pt; }
+.small { font-size: 8.2pt; color: var(--muted); }
+.page2 { break-before: page; padding-top: 11mm; }
+code { font: 8.2pt "JetBrainsMono NF", "JetBrains Mono", "DejaVu Sans Mono", monospace; }
+.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3mm; margin: 1mm 0 3mm; }
+.stat { background: var(--panel); border-radius: 2mm; padding: 2.6mm 3mm; border-top: 2.5px solid var(--accent); }
+.stat b { display: block; font-size: 15pt; line-height: 1.1; color: var(--ink); }
+.stat span { font-size: 7.8pt; color: var(--muted); }
+.foot { margin-top: 3mm; padding-top: 2mm; border-top: 1px solid var(--rule); font-size: 7.8pt; color: var(--muted); }
 </style>
 </head>
 <body>
-
-<h1>Doom-AI: an agent that plays DOOM levels it has never seen</h1>
-<p class="sub"><b>Team Screen Breakers:</b> Aarav Sukhadiya (team leader), Adit Krishnadas<br>
-Yugaantar 2026, DevForge, Track 1 "Can It Play DOOM?" &nbsp;|&nbsp; github.com/Aarav-Sukhadiya/Doom-AI &nbsp;|&nbsp; entry point <code>submission/agent.py</code></p>
-
-<h2>1. The problem and our idea</h2>
+<div class="band">
+  <h1>Doom-AI: an agent that plays DOOM levels it has never seen</h1>
+  <p class="team"><b>Team Screen Breakers</b> &nbsp; Aarav Sukhadiya (team leader), Adit Krishnadas</p>
+  <p class="meta">Yugaantar 2026, DevForge, Track 1 "Can It Play DOOM?" &nbsp;|&nbsp; github.com/Aarav-Sukhadiya/Doom-AI &nbsp;|&nbsp; entry point <code>submission/agent.py</code></p>
+</div>
+<div class="page">
+<h2><span class="n">1</span>The problem and our idea</h2>
 <p>The organisers test agents on unseen maps in four tiers: combat and survival, multi-room exploration with
 doors, long keycard routes, and a full gauntlet with several locks. An agent that memorises button sequences or
 a single map fails on new layouts. It has to learn general skills: fight, explore, find keys, remember where the
@@ -48,16 +63,22 @@ health, ammo, armour or a weapon), <b>breadcrumbs</b> (how often it has walked e
 position by dead reckoning from its turns and velocity, like counting steps in the dark. A trained neural network
 reads these memories and makes every decision.</div>
 
-<h2>2. System architecture</h2>
+<h2><span class="n">2</span>System architecture</h2>
 <svg class="diagram" viewBox="0 0 640 178" role="img" aria-label="Observations feed memories and encoders, which feed a recurrent policy with six action heads">
-  <g fill="#f4f5f7" stroke="#c9ced5">
+  <g fill="#f3f5f7" stroke="#cfd5dc">
     <rect x="2" y="6" width="150" height="166" rx="5"/>
     <rect x="172" y="6" width="190" height="166" rx="5"/>
     <rect x="382" y="44" width="112" height="90" rx="5"/>
     <rect x="514" y="6" width="124" height="166" rx="5"/>
   </g>
+  <g fill="#1d232b">
+    <path d="M2 11 a5 5 0 0 1 5 -5 h140 a5 5 0 0 1 5 5 v14 h-150 z"/>
+    <path d="M172 11 a5 5 0 0 1 5 -5 h180 a5 5 0 0 1 5 5 v14 h-190 z"/>
+    <path d="M382 49 a5 5 0 0 1 5 -5 h102 a5 5 0 0 1 5 5 v14 h-112 z"/>
+    <path d="M514 11 a5 5 0 0 1 5 -5 h114 a5 5 0 0 1 5 5 v14 h-124 z"/>
+  </g>
   <text x="10" y="20" class="t">Observations (official)</text>
-  <text x="10" y="36">Screen, 4 frames 60x80</text>
+  <text x="10" y="40">Screen, 4 frames 60x80</text>
   <text x="10" y="52">64 rays: distance + hit type</text>
   <text x="10" y="68">32 visible objects: type,</text>
   <text x="10" y="80">distance, direction, speed</text>
@@ -67,7 +88,7 @@ reads these memories and makes every decision.</div>
   <text x="10" y="148" class="m">Nothing privileged is used</text>
   <text x="10" y="160" class="m">when the agent plays.</text>
   <text x="180" y="20" class="t">Encoders and memories</text>
-  <text x="180" y="36">CNN on the screen</text>
+  <text x="180" y="40">CNN on the screen</text>
   <text x="180" y="50">Circular conv over the rays</text>
   <text x="180" y="64">Object embedding + pooling</text>
   <text x="180" y="80">Dead reckoning (turn model +</text>
@@ -101,7 +122,7 @@ reads these memories and makes every decision.</div>
 <code>submission/</code>. Each new memory was added as a residual branch whose output starts at zero, so a
 trained agent could be extended without forgetting what it already knew.</p>
 
-<h2>3. Technical approach</h2>
+<h2><span class="n">3</span>Technical approach</h2>
 <div class="grid2">
 <div>
 <h3>Learning</h3>
@@ -127,7 +148,15 @@ tests agree it is better and <code>validate.py</code> passes.</p>
 </div>
 </div>
 
-<h2 class="page2">4. Results</h2>
+</div>
+<div class="page page2">
+<div class="stats">
+  <div class="stat"><b>63.7</b><span>points on our official-style test, 100 locked levels per tier (from about 40 the evening before)</span></div>
+  <div class="stat"><b>84%</b><span>keycard levels finished: fetch the key, return to its door, exit</span></div>
+  <div class="stat"><b>115M</b><span>training decisions on one laptop, about 2,000 per second</span></div>
+  <div class="stat"><b>2.2 ms</b><span>per decision in the official Docker check (budget 40 ms), 761 MB RAM</span></div>
+</div>
+<h2><span class="n">4</span>Results</h2>
 <p>The submitted agent was trained overnight. Results are on levels it never trained on; the organisers' maps
 may differ from ours, so these are estimates.</p>
 <table>
@@ -145,7 +174,7 @@ may differ from ours, so these are estimates.</p>
 levels and a final check on 100 locked test levels per tier, where it beat four other candidates (63.7 points). Over the night our official-style test score rose from about 40 (the agent we had
 the evening before) to 64, and the validation score from 7.0 to 12.3.</p>
 
-<h2>5. What we learned</h2>
+<h2><span class="n">5</span>What we learned</h2>
 <ul>
 <li><b>Measure before changing.</b> Watching recorded runs found most of our fixes: the agent could not change
 weapons (no action produced the button), sprayed ammo at nothing, pressed USE 27 times on a yellow door
@@ -162,7 +191,7 @@ and doubled tier 4 exits, as better combat and navigation carried over.</li>
 More practice time on tier 4 and real maps is the clearest next step.</li>
 </ul>
 
-<h2>6. Playing by the rules</h2>
+<h2><span class="n">6</span>Playing by the rules</h2>
 <ul>
 <li>Every action comes from the trained network. There is no path-finding, no auto-aim and no hand-written
 behaviour. The only fixed logic is two masks taken from observation fields (no firing without an enemy in view,
@@ -174,5 +203,7 @@ a USE cooldown so a moving door is not reversed), which the rules allow.</li>
 <code>training/</code> with a guide in <code>training/README.md</code>.</li>
 </ul>
 
+<p class="foot">Team Screen Breakers, Doom-AI. Code, trained weights, tests and this brief: github.com/Aarav-Sukhadiya/Doom-AI</p>
+</div>
 </body>
 </html>
