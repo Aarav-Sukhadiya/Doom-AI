@@ -54,7 +54,6 @@ The checkpoint in this repository was trained overnight on a single laptop (~115
 | Tier 2: Multi-room with doors | 68 to 80% | 0% |
 | Tier 3: Single keycard levels | 72 to 84% | 0% |
 | Tier 4: Two-lock gauntlets | ~33% | ~50% |
-| Unseen real Freedoom levels | 0% *(not yet)* | Most runs |
 
 **Notable progress:**
 - Completed each of our three hardest test levels at least once, collecting both keycards and unlocking both doors en route to the exit.
