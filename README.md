@@ -11,7 +11,7 @@
 
 For decades, *"Can it run DOOM?"* was the benchmark for hardware. This project flips the question: **can a neural network actually play DOOM?**
 
-Conventional game bots break the moment a wall shifts or an enemy spawns in a new spot because they replay memorised button sequences. **Doom-AI** learns generalisable gameplay from scratch—no pre-built maps, no demonstration datasets, and no scripted navigation. Through pure trial and error, the agent learns to survive combat, open doors between rooms, collect keycards, backtrack to the matching locked door, and reach the exit on levels it has never seen before.
+Conventional game bots break the moment a wall shifts or an enemy spawns in a new spot because they replay memorised button sequences. **Doom-AI** learns generalisable gameplay from scratch: no pre-built maps, no demonstration datasets, and no scripted navigation. Through pure trial and error, the agent learns to survive combat, open doors between rooms, collect keycards, backtrack to the matching locked door, and reach the exit on levels it has never seen before.
 
 ---
 
@@ -19,13 +19,13 @@ Conventional game bots break the moment a wall shifts or an enemy spawns in a ne
 
 **The agent remembers places, not button sequences.**
 
-A human player exploring a new DOOM level makes mental notes—*"there was a red locked door back near the start"*—and returns once they find the red key. Doom-AI mirrors this behaviour by constructing three forms of spatial memory on the fly:
+A human player exploring a new DOOM level makes mental notes, such as *"there was a red locked door back near the start"*, and returns once they find the red key. Doom-AI mirrors this behaviour by constructing three forms of spatial memory on the fly:
 
 - **Landmarks:** Records the locations of key entities as they appear (locked doors, keycards, standard doors, health, ammo, armour, and weapons). Once holding a key, the agent can navigate directly back to the corresponding locked door.
 - **Breadcrumbs:** Tracks visitation density across traversed areas so the agent distinguishes explored corridors from new ground.
 - **Self-Drawn Map:** Projects 64 distance-sensor readings onto an egocentric (agent-centred) local grid marking open floor, walls, and doors, which the network reads like a mini-map.
 
-The environment never exposes absolute coordinates. The agent estimates its own position solely through movement history (dead reckoning—like counting steps in a dark room). Every decision is still produced by the trained neural network; these memories simply give the policy structured spatial context.
+The environment never exposes absolute coordinates. The agent estimates its own position solely through movement history (dead reckoning, like counting steps in a dark room). Every decision is still produced by the trained neural network; these memories simply give the policy structured spatial context.
 
 ---
 
@@ -37,9 +37,9 @@ The environment never exposes absolute coordinates. The agent estimates its own 
 | **Memory** | Short-term temporal state combined with the landmark registry, breadcrumb trail, and self-drawn local map. | Remembering *"the red door is behind me, to the left"* |
 | **Policy (Brain)** | A compact neural network mapping perception and memory directly to actions: move, strafe, turn, shoot, open doors, and switch weapons. | Deciding what to do next |
 | **Training** | Reinforcement learning across millions of steps. Reaching the exit yields the largest reward; keys, doors, new rooms, kills, and pickups earn smaller bonuses; damage and death incur penalties. | Practising a game until strong habits stick |
-| **Curriculum** | A custom procedural level generator producing endless layouts across four difficulty tiers—from single combat rooms to two-lock gauntlets—supplemented by 56 real Freedoom levels. | A coach assigning harder drills each week |
+| **Curriculum** | A custom procedural level generator producing endless layouts across four difficulty tiers, from single combat rooms to two-lock gauntlets, supplemented by 56 real Freedoom levels. | A coach assigning harder drills each week |
 
-Because the agent trains across thousands of procedurally generated layouts, memorising individual maps is impossible. It is forced to learn transferable skills—precisely what the competition evaluates.
+Because the agent trains across thousands of procedurally generated layouts, memorising individual maps is impossible. It is forced to learn transferable skills, which is precisely what the competition evaluates.
 
 ---
 
@@ -50,10 +50,10 @@ The checkpoint in this repository was trained overnight on a single laptop (~115
 | Evaluation Suite | Reaches Exit | Death Rate |
 | --- | :---: | :---: |
 | Organisers' test level (`maps/two_rooms.wad`) | 100% | 0% |
-| Tier 1 — Combat rooms | ~50% | 12–25% |
-| Tier 2 — Multi-room with doors | 68–80% | 0% |
-| Tier 3 — Single keycard levels | 72–84% | 0% |
-| Tier 4 — Two-lock gauntlets | ~33% | ~50% |
+| Tier 1: Combat rooms | ~50% | 12 to 25% |
+| Tier 2: Multi-room with doors | 68 to 80% | 0% |
+| Tier 3: Single keycard levels | 72 to 84% | 0% |
+| Tier 4: Two-lock gauntlets | ~33% | ~50% |
 | Unseen real Freedoom levels | 0% *(not yet)* | Most runs |
 
 **Notable progress:**
@@ -69,15 +69,15 @@ The checkpoint in this repository was trained overnight on a single laptop (~115
 
 ## Evaluation Pipeline
 
-- **Continuous Validation:** Every 10–15 minutes during training, candidate checkpoints are tested on 80 held-out unseen levels. Repository weights are promoted only when a checkpoint clearly outperforms the incumbent **and** passes `validate.py`.
-- **Official-Test Mirror:** A local benchmark replicating the competition rules as closely as possible—four tiers of locked levels excluded from training, matching per-map time limits, matching per-decision compute budgets, and scoring across all four official categories (*exit, progression, exploration, combat*).
+- **Continuous Validation:** Every 10 to 15 minutes during training, candidate checkpoints are tested on 80 held-out unseen levels. Repository weights are promoted only when a checkpoint clearly outperforms the incumbent **and** passes `validate.py`.
+- **Official-Test Mirror:** A local benchmark replicating the competition rules as closely as possible: four tiers of locked levels excluded from training, matching per-map time limits, matching per-decision compute budgets, and scoring across all four official categories (*exit, progression, exploration, combat*).
 - **Playback & Recording:** Best runs on the hardest levels are captured as video, and a live runner replays the current agent continuously at real-time speed.
 
 ---
 
 ## Competition Compliance
 
-- **Purely Learned Policy:** Every action is generated by the trained neural network—no hand-crafted *"if X, do Y"* heuristics, no pathfinding algorithms, and no auto-aim.
+- **Purely Learned Policy:** Every action is generated by the trained neural network, with no hand-crafted *"if X, do Y"* heuristics, no pathfinding algorithms, and no auto-aim.
 - **Permitted Action Masks:** Only two observation-derived masks are applied (both allowed under track rules): firing is masked when no enemy is visible, and `USE` enters a brief cooldown after activation so the agent does not accidentally reverse a moving door.
 - **Strict Train/Test Separation:** Custom levels, reward shaping, and curriculum scaling are confined to training. During evaluation, the agent receives only standard player-visible observations through the organisers' unmodified wrapper.
 - **Original Implementation:** All agent architecture, memory modules, level generators, and training pipelines were built during the hackathon and are included in this repository.
@@ -88,7 +88,7 @@ The checkpoint in this repository was trained overnight on a single laptop (~115
 
 | Requirement | Location |
 | --- | --- |
-| Public repository, trained weights, and track entry point | This repo — entry point: `submission/agent.py` · weights: `submission/weights/` |
+| Public repository, trained weights, and track entry point | This repo. Entry point: `submission/agent.py` · weights: `submission/weights/` |
 | 2-page project brief (USP, architecture, technical approach) | [brief/brief.pdf](brief/brief.pdf) |
 
 ---

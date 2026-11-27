@@ -42,6 +42,19 @@ code { font: 8.2pt "JetBrainsMono NF", "JetBrains Mono", "DejaVu Sans Mono", mon
 .stat b { display: block; font-size: 15pt; line-height: 1.1; color: var(--ink); }
 .stat span { font-size: 7.8pt; color: var(--muted); }
 .foot { margin-top: 3mm; padding-top: 2mm; border-top: 1px solid var(--rule); font-size: 7.8pt; color: var(--muted); }
+.card { background: #fff; border: 1px solid var(--rule); border-top: 3px solid var(--accent); border-radius: 2mm; padding: 3mm 3.5mm; }
+.card h3 { margin-top: 0; }
+.card p:last-child { margin-bottom: 0; }
+.cards2 { display: grid; grid-template-columns: 1fr 1fr; gap: 4mm; margin: 1mm 0 2mm; }
+.cards2 .card { border-top-width: 2px; font-size: 9pt; }
+.cards2 .card b { display: block; color: var(--accent); margin-bottom: 1mm; font-size: 9.6pt; }
+.checks { list-style: none; padding: 0; margin: 1mm 0 2mm; display: grid; gap: 2mm; }
+.checks li { background: var(--panel); border-radius: 2mm; padding: 2.4mm 3mm 2.4mm 9mm; position: relative; margin: 0; }
+.checks li::before { content: ""; position: absolute; left: 3.2mm; top: 3.1mm; width: 2.6mm; height: 1.3mm; border-left: 2px solid var(--accent); border-bottom: 2px solid var(--accent); transform: rotate(-45deg); }
+.bar { height: 2.2mm; background: var(--rule); border-radius: 1mm; overflow: hidden; min-width: 22mm; }
+.bar i { display: block; height: 100%; background: var(--accent); }
+.page3 { break-before: page; padding-top: 11mm; }
+.page2 h2:first-of-type { margin-top: 0; }
 </style>
 </head>
 <body>
@@ -122,77 +135,69 @@ reads these memories and makes every decision.</div>
 <code>submission/</code>. Each new memory was added as a residual branch whose output starts at zero, so a
 trained agent could be extended without forgetting what it already knew.</p>
 
-<h2><span class="n">3</span>Technical approach</h2>
-<div class="grid2">
-<div>
-<h3>Learning</h3>
-<p>Recurrent PPO with GAE, trained from scratch on one laptop (RTX 5070 Laptop GPU, 16 threads): 56 games in
-parallel in lightweight worker processes, about 2,000 decisions per second, about 115 million decisions in total.
-Gradients flow through the GRU over 32-step chunks.</p>
-<h3>Practice levels</h3>
-<p>Our level generator writes real DOOM maps from text layouts in the four tiers and proves each one solvable
-before use. Seeds are split 80/10/10 into practice, validation and locked test levels. The agent also practises
-on 56 real Freedoom maps; 12 more are kept back only for testing. Difficulty rises per tier as the agent
-improves, and a controller shifts practice between tiers from test results.</p>
-</div>
-<div>
-<h3>Rewards (training only)</h3>
-<p>The exit is worth the most (25, plus health and time bonuses). Smaller rewards go to keys, doors, locked doors,
-new areas and ground, kills, pickups and dodging incoming fireballs. Damage, dying early, wasted ammo and pressing
-USE on a door it has no key for all cost points. A training-only hint rewards progress toward the next key, its
-door, then the exit. None of this reaches the submitted agent.</p>
-<h3>Testing and safe shipping</h3>
-<p>Every 200 updates a snapshot plays 80 validation levels and our copy of the official test: 25 locked levels
-per tier with the official time and compute limits, scored in the four official categories. It ships only if both
-tests agree it is better and <code>validate.py</code> passes.</p>
-</div>
-</div>
-
-</div>
-<div class="page page2">
-<div class="stats">
+<div class="stats" style="margin-top:5mm">
   <div class="stat"><b>63.7</b><span>points on our official-style test, 100 locked levels per tier (from about 40 the evening before)</span></div>
   <div class="stat"><b>84%</b><span>keycard levels finished: fetch the key, return to its door, exit</span></div>
   <div class="stat"><b>115M</b><span>training decisions on one laptop, about 2,000 per second</span></div>
   <div class="stat"><b>2.2 ms</b><span>per decision in the official Docker check (budget 40 ms), 761 MB RAM</span></div>
 </div>
+</div>
+<div class="page page2">
+<h2><span class="n">3</span>Technical approach</h2>
+<div class="grid2" style="gap:4mm">
+<div class="card"><h3>Learning</h3><p>Recurrent PPO with GAE, trained from scratch on one laptop (RTX 5070 Laptop GPU, 16 threads): 56 games in
+parallel in lightweight worker processes, about 2,000 decisions per second, about 115 million decisions in total.
+Gradients flow through the GRU over 32-step chunks.</p></div>
+<div class="card"><h3>Practice levels</h3><p>Our level generator writes real DOOM maps from text layouts in the four tiers and proves each one solvable
+before use. Seeds are split 80/10/10 into practice, validation and locked test levels. The agent also practises
+on 56 real Freedoom maps; 12 more are kept back only for testing. Difficulty rises per tier as the agent
+improves, and a controller shifts practice between tiers from test results.</p></div>
+<div class="card"><h3>Rewards (training only)</h3><p>The exit is worth the most (25, plus health and time bonuses). Smaller rewards go to keys, doors, locked doors,
+new areas and ground, kills, pickups and dodging incoming fireballs. Damage, dying early, wasted ammo and pressing
+USE on a door it has no key for all cost points. A training-only hint rewards progress toward the next key, its
+door, then the exit. None of this reaches the submitted agent.</p></div>
+<div class="card"><h3>Testing and safe shipping</h3><p>Every 200 updates a snapshot plays 80 validation levels and our copy of the official test: 25 locked levels
+per tier with the official time and compute limits, scored in the four official categories. It ships only if both
+tests agree it is better and <code>validate.py</code> passes.</p></div>
+</div>
 <h2><span class="n">4</span>Results</h2>
 <p>The submitted agent was trained overnight. Results are on levels it never trained on; the organisers' maps
 may differ from ours, so these are estimates.</p>
 <table>
-<thead><tr><th>Test</th><th class="n">Exit reached</th><th class="n">Died</th><th>Notes</th></tr></thead>
+<thead><tr><th>Test</th><th class="n">Exit reached</th><th style="width:26mm"></th><th class="n">Died</th><th>Notes</th></tr></thead>
 <tbody>
-<tr><td>Organisers' test map (two_rooms)</td><td class="n">every run</td><td class="n">0%</td><td>Passes <code>validate.py</code>; 1.2 s of its 21 s compute budget</td></tr>
-<tr><td>Tier 1, combat and survival</td><td class="n">50 to 55%</td><td class="n">12 to 25%</td><td>Fires only at visible enemies, dodges fireballs</td></tr>
-<tr><td>Tier 2, multi-room with doors</td><td class="n">68 to 80%</td><td class="n">0%</td><td>Opens doors and works room to room</td></tr>
-<tr><td>Tier 3, keycards</td><td class="n">72 to 84%</td><td class="n">0%</td><td>Fetches the key, returns to its door</td></tr>
-<tr><td>Tier 4, full gauntlet</td><td class="n">32 to 36%</td><td class="n">48 to 50%</td><td>Has finished each of our 3 hardest levels</td></tr>
-<tr><td>Held-out Freedoom maps</td><td class="n">0%</td><td class="n">83 to 92%</td><td>Explores and fights; far larger than practice maps</td></tr>
+<tr><td>Organisers' test map (two_rooms)</td><td class="n">every run</td><td><div class="bar"><i style="width:100%"></i></div></td><td class="n">0%</td><td>Passes <code>validate.py</code>; 1.2 s of its 21 s compute budget</td></tr>
+<tr><td>Tier 1, combat and survival</td><td class="n">50 to 55%</td><td><div class="bar"><i style="width:52%"></i></div></td><td class="n">12 to 25%</td><td>Fires only at visible enemies, dodges fireballs</td></tr>
+<tr><td>Tier 2, multi-room with doors</td><td class="n">68 to 80%</td><td><div class="bar"><i style="width:74%"></i></div></td><td class="n">0%</td><td>Opens doors and works room to room</td></tr>
+<tr><td>Tier 3, keycards</td><td class="n">72 to 84%</td><td><div class="bar"><i style="width:78%"></i></div></td><td class="n">0%</td><td>Fetches the key, returns to its door</td></tr>
+<tr><td>Tier 4, full gauntlet</td><td class="n">32 to 36%</td><td><div class="bar"><i style="width:34%"></i></div></td><td class="n">48 to 50%</td><td>Has finished each of our 3 hardest levels</td></tr>
+<tr><td>Held-out Freedoom maps</td><td class="n">0%</td><td><div class="bar"><i style="width:0%"></i></div></td><td class="n">83 to 92%</td><td>Explores and fights; far larger than practice maps</td></tr>
 </tbody>
 </table>
 <p class="small">Each range is the submitted agent on three held-out sets: 20 validation levels, 25 locked test
 levels and a final check on 100 locked test levels per tier, where it beat four other candidates (63.7 points). Over the night our official-style test score rose from about 40 (the agent we had
 the evening before) to 64, and the validation score from 7.0 to 12.3.</p>
 
+</div>
+<div class="page page3">
 <h2><span class="n">5</span>What we learned</h2>
-<ul>
-<li><b>Measure before changing.</b> Watching recorded runs found most of our fixes: the agent could not change
+<div class="cards2">
+<div class="card"><b>Measure before changing.</b>Watching recorded runs found most of our fixes: the agent could not change
 weapons (no action produced the button), sprayed ammo at nothing, pressed USE 27 times on a yellow door
-without the key, and walked away from an exit 2 tiles away because nothing it senses shows the exit.</li>
-<li><b>Rewards shape behaviour more than architecture.</b> Raising the exit reward from 10 to 25 gave the
+without the key, and walked away from an exit 2 tiles away because nothing it senses shows the exit.</div>
+<div class="card"><b>Rewards shape behaviour more than architecture.</b>Raising the exit reward from 10 to 25 gave the
 largest single gain. Penalties for standing still in fights made the policy steadily more random and the
-score fell, so we removed them and used positive rewards for dodging instead.</li>
-<li><b>One test is not enough.</b> Validation and our official-style test once disagreed for 400 updates; a
-larger test showed keycard skill slipping after we cut its practice share. Shipping now needs both.</li>
-<li><b>Practise the weak tiers, then finish gently.</b> Focusing practice on rooms and keycards, then on combat
+score fell, so we removed them and used positive rewards for dodging instead.</div>
+<div class="card"><b>One test is not enough.</b>Validation and our official-style test once disagreed for 400 updates; a
+larger test showed keycard skill slipping after we cut its practice share. Shipping now needs both.</div>
+<div class="card"><b>Practise the weak tiers, then finish gently.</b>Focusing practice on rooms and keycards, then on combat
 and the gauntlet, and halving the learning rate for the last hours, took the official-style score from 55 to 64
-and doubled tier 4 exits, as better combat and navigation carried over.</li>
-<li><b>Known limits.</b> Several enemies at once, exits far from everything else, and very large real maps.
-More practice time on tier 4 and real maps is the clearest next step.</li>
-</ul>
-
+and doubled tier 4 exits, as better combat and navigation carried over.</div>
+<div class="card"><b>Known limits.</b>Several enemies at once, exits far from everything else, and very large real maps.
+More practice time on tier 4 and real maps is the clearest next step.</div>
+</div>
 <h2><span class="n">6</span>Playing by the rules</h2>
-<ul>
+<ul class="checks">
 <li>Every action comes from the trained network. There is no path-finding, no auto-aim and no hand-written
 behaviour. The only fixed logic is two masks taken from observation fields (no firing without an enemy in view,
 a USE cooldown so a moving door is not reversed), which the rules allow.</li>
